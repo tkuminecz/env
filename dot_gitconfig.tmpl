@@ -1,0 +1,32 @@
+[alias]
+	b = branch
+	co = checkout
+        sb = !git b | fzf | cut -c 3- | xargs git co
+	d = diff
+        df = diff -b --stat
+        dw = diff --color-words='[^[:space:]]|([[:alnum:]]|UTF_8_GUARD)+'
+        f = fetch
+	l = log --graph --abbrev-commit --date=relative --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr)%Creset %an ¬ %Cblue%cD%Creset'
+	m = merge
+	rb = rebase
+	s = status -uall -s
+        unmerged = l origin/main..
+	clean = clean --exclude=.jj
+[coderabbit]
+	machineId = cli/3935fc6b9af040749ffcdc3969f1e281
+[user]
+	name = Tim Kuminecz
+	email = tkuminecz@gmail.com
+[includeIf "gitdir:~/jb/"]
+    path = ~/.gitconfig.jb
+[filter "lfs"]
+	process = git-lfs filter-process
+	required = true
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+[credential "https://github.com"]
+	helper = 
+	helper = !{{ if eq .chezmoi.os "darwin" }}/opt/homebrew/bin/gh{{ else }}gh{{ end }} auth git-credential
+[credential "https://gist.github.com"]
+	helper = 
+	helper = !{{ if eq .chezmoi.os "darwin" }}/opt/homebrew/bin/gh{{ else }}gh{{ end }} auth git-credential

@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "name": "force-push",
+      "tool": "Bash",
+      "pattern": "git\\s+push\\s+.*--force",
+      "description": "Force pushing to remote",
+      "severity": "warn"
+    },
+    {
+      "name": "destructive-rm",
+      "tool": "Bash",
+      "pattern": "rm\\s+(-[a-zA-Z]*r[a-zA-Z]*|--recursive)",
+      "description": "Recursive delete detected — are you sure?",
+      "severity": "warn"
+    },
+    {
+      "name": "drop-table",
+      "tool": "Bash",
+      "pattern": "(?i)DROP\\s+(TABLE|DATABASE)",
+      "description": "SQL DROP TABLE statements",
+      "severity": "warn"
+    },
+    {
+      "name": "env-secrets",
+      "tool": "Bash",
+      "pattern": "cat\\s+.*\\.env",
+      "description": "Reading .env files that may contain secrets",
+      "severity": "warn"
+    }
+  ]
+}

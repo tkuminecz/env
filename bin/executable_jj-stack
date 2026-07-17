@@ -1,0 +1,926 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+TARGET="main@origin"
+TARGET_BRANCH="main"
+
+# ── Colors ────────────────────────────────────────────────────────────────────
+
+if [ -t 1 ]; then
+  DIM=$'\033[2m'
+  BOLD=$'\033[1m'
+  CYAN=$'\033[36m'
+  GREEN=$'\033[32m'
+  YELLOW=$'\033[33m'
+  RESET=$'\033[0m'
+else
+  DIM="" BOLD="" CYAN="" GREEN="" YELLOW="" RESET=""
+fi
+
+# Print a step header: "Step N: description"
+step_header() {
+  local step="$1" msg="$2"
+  echo "${BOLD}Step ${step}: ${msg}${RESET}"
+}
+
+# Print a command being run (dimmed)
+show_cmd() {
+  echo "${DIM}  > $*${RESET}"
+}
+
+# Run a command with its output dimmed
+run_dimmed() {
+  "$@" 2>&1 | while IFS= read -r line; do
+    echo "${DIM}  ${line}${RESET}"
+  done
+  return "${PIPESTATUS[0]}"
+}
+
+# ── Usage ─────────────────────────────────────────────────────────────────────
+
+usage() {
+  cat <<EOF
+Usage: jj-stack <command> [options]
+
+Manage stacked PRs with jj.
+
+Commands:
+  create [--execute]   Create stacked PRs from bookmarks off main
+  list                 Show current stacks with PR annotations
+  status [bookmark]    Detailed PR status for a stack
+  sync                 Push all bookmarks in main.. to remote
+  rebase               Rebase all stacks onto latest main
+  land <pr>            Land a PR via squash merge
+
+EOF
+  exit 1
+}
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
+
+check_deps() {
+  local required=("$@")
+  for cmd in "${required[@]}"; do
+    if ! command -v "$cmd" &>/dev/null; then
+      echo "Error: Required command '$cmd' is not installed." >&2
+      exit 1
+    fi
+  done
+}
+
+# ── Repo utilities ────────────────────────────────────────────────────────────
+
+get_repo_slug() {
+  gh repo view --json nameWithOwner -q '.nameWithOwner'
+}
+
+# ── Stack detection ───────────────────────────────────────────────────────────
+#
+# Detects linear chains of bookmarked commits off main.
+#
+# Output format (one line per stack, bookmarks space-separated root→tip):
+#   bookmark1 bookmark2 bookmark3
+#   other-bookmark1 other-bookmark2
+#
+# A "stack" is a linear chain with 1+ bookmarks. Each bookmark appears in
+# exactly one stack.
+
+get_stacks() {
+  # Get all bookmarks in main.. using jj's revset engine.
+  # jj log outputs in reverse topological order (tip first).
+  local raw
+  raw="$(jj log -r 'bookmarks() & main..' --no-graph -T 'bookmarks.map(|b| b.name()).join(",") ++ "\n"' 2>/dev/null)" || true
+
+  if [ -z "$raw" ]; then
+    return 0
+  fi
+
+  # Collect individual bookmark names
+  local bookmarks=()
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    IFS=',' read -ra bms <<< "$line"
+    for bm in "${bms[@]}"; do
+      [ -n "$bm" ] && bookmarks+=("$bm")
+    done
+  done <<< "$raw"
+
+  local n=${#bookmarks[@]}
+  [ "$n" -eq 0 ] && return 0
+
+  # For each bookmark, find its closest ancestor that is also a bookmarked
+  # commit in main.. (its "parent bookmark"). Uses jj's revset engine so we
+  # don't need to build a commit graph in bash.
+  local parent_bm=()  # parent_bm[i] = name of parent bookmark, or "" if root
+  for ((i=0; i<n; i++)); do
+    local bm="${bookmarks[$i]}"
+    local closest
+    closest="$(jj log -r "(ancestors($bm) & bookmarks() & main..) ~ $bm" --no-graph -T 'bookmarks.map(|b| b.name()).join(",") ++ "\n"' --limit 1 2>/dev/null | head -1)" || true
+
+    if [ -n "$closest" ]; then
+      parent_bm+=("${closest%%,*}")
+    else
+      parent_bm+=("")
+    fi
+  done
+
+  # Build chains starting from roots (no parent bookmark)
+  local visited=()
+  for ((i=0; i<n; i++)); do
+    visited+=(0)
+  done
+
+  _walk_chain() {
+    local start_idx=$1
+    local chain=()
+    local current="${bookmarks[$start_idx]}"
+    visited[$start_idx]=1
+    chain+=("$current")
+
+    while true; do
+      local found=false
+      for ((j=0; j<n; j++)); do
+        [ "${visited[$j]}" -eq 1 ] && continue
+        if [ "${parent_bm[$j]}" = "$current" ]; then
+          visited[$j]=1
+          current="${bookmarks[$j]}"
+          chain+=("$current")
+          found=true
+          break
+        fi
+      done
+      $found || break
+    done
+
+    echo "${chain[*]}"
+  }
+
+  # First pass: chains starting from roots
+  for ((i=0; i<n; i++)); do
+    [ "${visited[$i]}" -eq 1 ] && continue
+    [ -n "${parent_bm[$i]}" ] && continue
+    _walk_chain "$i"
+  done
+
+  # Second pass: any remaining bookmarks (e.g. branches from fork points)
+  for ((i=0; i<n; i++)); do
+    [ "${visited[$i]}" -eq 1 ] && continue
+    _walk_chain "$i"
+  done
+
+  unset -f _walk_chain
+}
+
+# Get bookmarks in main.. as a simple list
+get_bookmarks_off_main() {
+  jj log -r 'bookmarks() & main..' --no-graph -T 'bookmarks.map(|b| b.name()).join("\n") ++ "\n"' 2>/dev/null | grep -v '^$' || true
+}
+
+# Find PR number for a given bookmark name
+find_pr_for_bookmark() {
+  local bookmark="$1"
+  local pr_data="$2"  # JSON array from gh pr list
+  echo "$pr_data" | jq -r --arg b "$bookmark" '.[] | select(.headRefName == $b) | .number' 2>/dev/null || true
+}
+
+# Fetch all PR data for bookmarks in one batch
+fetch_pr_data() {
+  gh pr list --state all --limit 100 --json number,headRefName,state,url,title,baseRefName,reviewDecision,statusCheckRollup 2>/dev/null || echo '[]'
+}
+
+# ── Subcommands ───────────────────────────────────────────────────────────────
+
+# ── list ──────────────────────────────────────────────────────────────────────
+
+cmd_list() {
+  check_deps jj gh jq
+
+  local stacks
+  stacks="$(get_stacks)"
+
+  if [ -z "$stacks" ]; then
+    echo "No stacks found (no bookmarks in main..)."
+    return 0
+  fi
+
+  # Fetch PR data once
+  local pr_data
+  pr_data="$(fetch_pr_data)"
+
+  local stack_num=0
+  while IFS= read -r stack_line; do
+    stack_num=$((stack_num + 1))
+    local bookmarks=($stack_line)
+
+    echo "${BOLD}Stack ${stack_num}:${RESET}"
+    local prev="$TARGET_BRANCH"
+
+    for i in "${!bookmarks[@]}"; do
+      local bm="${bookmarks[$i]}"
+      local indent=""
+      for ((j=0; j<=i; j++)); do
+        indent="  ${indent}"
+      done
+
+      # Look up PR info
+      local pr_num pr_state pr_url pr_annotation=""
+      pr_num="$(echo "$pr_data" | jq -r --arg b "$bm" '.[] | select(.headRefName == $b) | .number' 2>/dev/null | head -1)"
+      if [ -n "$pr_num" ]; then
+        pr_state="$(echo "$pr_data" | jq -r --arg b "$bm" '.[] | select(.headRefName == $b) | .state' 2>/dev/null | head -1)"
+        local pr_state_lower
+        pr_state_lower="$(echo "$pr_state" | tr 'A-Z' 'a-z')"
+        local state_color="$RESET"
+        case "$pr_state" in
+          OPEN) state_color="$GREEN" ;;
+          MERGED) state_color="$CYAN" ;;
+          CLOSED) state_color="$YELLOW" ;;
+        esac
+        pr_annotation="  ${DIM}(PR #${pr_num} - ${state_color}${pr_state_lower}${RESET}${DIM})${RESET}"
+      fi
+
+      if [ "$i" -eq 0 ]; then
+        echo "  ${DIM}${prev}${RESET}"
+        echo "  └─ ${CYAN}${bm}${RESET}${pr_annotation}"
+      else
+        echo "${indent}└─ ${CYAN}${bm}${RESET}${pr_annotation}"
+      fi
+
+      prev="$bm"
+    done
+    echo ""
+  done <<< "$stacks"
+}
+
+# ── sync ──────────────────────────────────────────────────────────────────────
+
+cmd_sync() {
+  check_deps jj
+
+  echo "${BOLD}=== jj-stack sync ===${RESET}"
+  echo ""
+
+  local bookmarks
+  bookmarks="$(get_bookmarks_off_main)"
+
+  if [ -z "$bookmarks" ]; then
+    echo "No bookmarks in main.. to push."
+    return 0
+  fi
+
+  local bm_count
+  bm_count="$(echo "$bookmarks" | wc -l | tr -d ' ')"
+
+  echo "Found ${bm_count} bookmark(s) to push to remote:"
+  while IFS= read -r bm; do
+    echo "  ${CYAN}${bm}${RESET}"
+  done <<< "$bookmarks"
+  echo ""
+
+  local ans
+  read -r -p "Push all bookmarks? [y/N] " ans </dev/tty
+  case "$ans" in
+    y|Y) ;;
+    *)
+      echo "Aborted."
+      return 0
+      ;;
+  esac
+
+  echo ""
+  while IFS= read -r bm; do
+    show_cmd "jj git push --bookmark $bm --allow-new"
+    run_dimmed jj git push --bookmark "$bm" --allow-new
+  done <<< "$bookmarks"
+
+  echo ""
+  echo "${GREEN}All bookmarks pushed.${RESET}"
+}
+
+# ── status ────────────────────────────────────────────────────────────────────
+
+cmd_status() {
+  check_deps jj gh jq
+
+  local filter_bookmark="${1:-}"
+  local stacks
+  stacks="$(get_stacks)"
+
+  if [ -z "$stacks" ]; then
+    echo "No stacks found."
+    return 0
+  fi
+
+  # Fetch PR data once
+  local pr_data
+  pr_data="$(fetch_pr_data)"
+
+  local stack_num=0
+  while IFS= read -r stack_line; do
+    local bookmarks=($stack_line)
+
+    # If filtering, skip stacks that don't contain the bookmark
+    if [ -n "$filter_bookmark" ]; then
+      local found=false
+      for bm in "${bookmarks[@]}"; do
+        if [ "$bm" = "$filter_bookmark" ]; then
+          found=true
+          break
+        fi
+      done
+      $found || continue
+    fi
+
+    stack_num=$((stack_num + 1))
+    echo "Stack ${stack_num}:"
+    echo ""
+
+    for bm in "${bookmarks[@]}"; do
+      local pr_num pr_state pr_url pr_review pr_title checks_summary
+      pr_num="$(echo "$pr_data" | jq -r --arg b "$bm" '.[] | select(.headRefName == $b) | .number' 2>/dev/null | head -1)"
+
+      if [ -n "$pr_num" ]; then
+        pr_state="$(echo "$pr_data" | jq -r --arg b "$bm" '.[] | select(.headRefName == $b) | .state' 2>/dev/null | head -1)"
+        pr_url="$(echo "$pr_data" | jq -r --arg b "$bm" '.[] | select(.headRefName == $b) | .url' 2>/dev/null | head -1)"
+        pr_title="$(echo "$pr_data" | jq -r --arg b "$bm" '.[] | select(.headRefName == $b) | .title' 2>/dev/null | head -1)"
+        pr_review="$(echo "$pr_data" | jq -r --arg b "$bm" '.[] | select(.headRefName == $b) | .reviewDecision' 2>/dev/null | head -1)"
+
+        # Summarize CI checks
+        checks_summary="$(echo "$pr_data" | jq -r --arg b "$bm" '
+          .[] | select(.headRefName == $b) | .statusCheckRollup |
+          if . == null or length == 0 then "no checks"
+          else
+            (map(.state // .status) | group_by(.) | map(.[0] + ": " + (length | tostring)) | join(", "))
+          end
+        ' 2>/dev/null | head -1)"
+
+        echo "  ${bm}"
+        echo "    PR:      #${pr_num} - ${pr_title}"
+        echo "    State:   $(echo "$pr_state" | tr 'A-Z' 'a-z')"
+        echo "    Review:  ${pr_review:-none}"
+        echo "    Checks:  ${checks_summary}"
+        echo "    URL:     ${pr_url}"
+      else
+        echo "  ${bm}"
+        echo "    PR:      (none)"
+      fi
+      echo ""
+    done
+  done <<< "$stacks"
+
+  if [ "$stack_num" -eq 0 ] && [ -n "$filter_bookmark" ]; then
+    echo "Bookmark '${filter_bookmark}' not found in any stack."
+  fi
+}
+
+# ── create ────────────────────────────────────────────────────────────────────
+
+cmd_create() {
+  local execute=false
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --execute) execute=true; shift ;;
+      *) echo "Unknown option: $1" >&2; usage ;;
+    esac
+  done
+
+  check_deps jj gh jq fzf
+
+  local stacks
+  stacks="$(get_stacks)"
+
+  if [ -z "$stacks" ]; then
+    echo "No stacks found (no bookmarks in main..)."
+    return 0
+  fi
+
+  # Count stacks
+  local stack_count
+  stack_count="$(echo "$stacks" | wc -l | tr -d ' ')"
+
+  local selected_stack
+  if [ "$stack_count" -eq 1 ]; then
+    selected_stack="$stacks"
+  else
+    echo "Multiple stacks found. Select one:"
+    echo ""
+    local idx=0
+    while IFS= read -r stack_line; do
+      idx=$((idx + 1))
+      echo "  [${idx}] ${stack_line}"
+    done <<< "$stacks"
+    echo ""
+
+    local choice
+    read -r -p "Stack number: " choice </dev/tty
+    selected_stack="$(echo "$stacks" | sed -n "${choice}p")"
+    if [ -z "$selected_stack" ]; then
+      echo "Invalid selection." >&2
+      exit 1
+    fi
+  fi
+
+  local bookmarks=($selected_stack)
+  local count=${#bookmarks[@]}
+
+  # Get commit info for each bookmark (parallel indexed arrays)
+  local bm_commits=()
+  local bm_descs=()
+  for bm in "${bookmarks[@]}"; do
+    local info
+    info="$(jj log -r "$bm" --no-graph -T 'commit_id.short(7) ++ "\t" ++ description.first_line()' --limit 1 2>/dev/null)" || true
+    bm_commits+=("$(echo "$info" | cut -f1)")
+    bm_descs+=("$(echo "$info" | cut -f2)")
+  done
+
+  # Toggle UI — all selected by default (parallel indexed array, 1=selected)
+  local bm_selected=()
+  for ((i=0; i<count; i++)); do
+    bm_selected+=(1)
+  done
+
+  while true; do
+    echo ""
+    echo "Bookmarks in stack (closest to main first):"
+    for ((i=0; i<count; i++)); do
+      local num=$((i + 1))
+      local mark="x"
+      [ "${bm_selected[$i]}" -eq 0 ] && mark=" "
+      printf "  [%d] [%s] %-40s %s  \"%s\"\n" "$num" "$mark" "${bookmarks[$i]}" "${bm_commits[$i]}" "${bm_descs[$i]}"
+    done
+    echo ""
+    read -r -p "Toggle by number (comma-separated), Enter to confirm: " toggle_input </dev/tty
+
+    if [ -z "$toggle_input" ]; then
+      break
+    fi
+
+    IFS=',' read -ra toggles <<< "$toggle_input"
+    for t in "${toggles[@]}"; do
+      t="$(echo "$t" | tr -d ' ')"
+      if [[ "$t" =~ ^[0-9]+$ ]] && [ "$t" -ge 1 ] && [ "$t" -le "$count" ]; then
+        local idx=$((t - 1))
+        if [ "${bm_selected[$idx]}" -eq 1 ]; then
+          bm_selected[$idx]=0
+        else
+          bm_selected[$idx]=1
+        fi
+      fi
+    done
+  done
+
+  # Build ordered list of selected bookmarks
+  local selected_bookmarks=()
+  for ((i=0; i<count; i++)); do
+    if [ "${bm_selected[$i]}" -eq 1 ]; then
+      selected_bookmarks+=("${bookmarks[$i]}")
+    fi
+  done
+
+  if [ ${#selected_bookmarks[@]} -eq 0 ]; then
+    echo "No bookmarks selected."
+    return 0
+  fi
+
+  # Determine chain targeting: first → main, each subsequent → previous
+  local repo_slug
+  repo_slug="$(get_repo_slug)"
+
+  echo ""
+  echo "PRs to create:"
+  echo ""
+
+  local prev_base="$TARGET_BRANCH"
+  local pr_commands=()
+  local compare_urls=()
+
+  for bm in "${selected_bookmarks[@]}"; do
+    echo "  ${bm} → base: ${prev_base}"
+    pr_commands+=("gh pr create --head \"${bm}\" --base \"${prev_base}\" --fill")
+    compare_urls+=("https://github.com/${repo_slug}/compare/${prev_base}...${bm}")
+    prev_base="$bm"
+  done
+
+  echo ""
+
+  if $execute; then
+    local ans
+    read -r -p "Push bookmarks and create PRs? [y/N] " ans </dev/tty
+    case "$ans" in
+      y|Y) ;;
+      *)
+        echo "Aborted."
+        return 0
+        ;;
+    esac
+
+    # Push all selected bookmarks first
+    echo ""
+    echo "Pushing bookmarks..."
+    for bm in "${selected_bookmarks[@]}"; do
+      echo "  Pushing ${bm}..."
+      jj git push --bookmark "$bm" --allow-new
+    done
+
+    # Create PRs
+    echo ""
+    echo "Creating PRs..."
+    prev_base="$TARGET_BRANCH"
+    for bm in "${selected_bookmarks[@]}"; do
+      echo ""
+      echo "  Creating PR: ${bm} → ${prev_base}"
+      gh pr create --head "$bm" --base "$prev_base" --fill
+      prev_base="$bm"
+    done
+
+    echo ""
+    echo "All PRs created. View them:"
+    for bm in "${selected_bookmarks[@]}"; do
+      local pr_url
+      pr_url="$(gh pr view "$bm" --json url -q '.url' 2>/dev/null || echo '(unknown)')"
+      echo "  ${bm}: ${pr_url}"
+    done
+  else
+    echo "Commands to create PRs:"
+    echo ""
+    for cmd in "${pr_commands[@]}"; do
+      echo "  $cmd"
+    done
+    echo ""
+    echo "Compare URLs:"
+    echo ""
+    for url in "${compare_urls[@]}"; do
+      echo "  $url"
+    done
+    echo ""
+    echo "Run with --execute to push bookmarks and create PRs."
+  fi
+}
+
+# ── rebase ────────────────────────────────────────────────────────────────────
+
+cmd_rebase() {
+  check_deps jj
+
+  echo "${BOLD}=== jj-stack rebase ===${RESET}"
+  echo ""
+
+  # Capture the operation ID before we start, so we can offer a single
+  # restore command that undoes all the operations we're about to perform.
+  local before_op
+  before_op="$(jj op log --no-graph -T 'self.id().short() ++ "\n"' --limit 1 2>/dev/null)" || true
+
+  step_header "1/3" "Fetch latest changes from remote"
+  show_cmd "jj git fetch"
+  run_dimmed jj git fetch
+  echo ""
+
+  # Only rebase commits that are ancestors of bookmarks or the working copy (@),
+  # not orphaned commits sitting on old immutable revisions.
+  step_header "2/3" "Find stack roots to rebase"
+  local revset='roots(main.. & (ancestors(bookmarks() | @) | descendants(bookmarks() | @)))'
+  local roots
+  roots="$(jj log -r "$revset" --no-graph -T 'change_id ++ "\n"' 2>/dev/null | grep -v '^$')" || true
+
+  if [ -z "$roots" ]; then
+    echo "  Nothing to rebase — no active commits in main.."
+    return 0
+  fi
+
+  local root_count
+  root_count="$(echo "$roots" | wc -l | tr -d ' ')"
+  echo "  Found ${root_count} root(s) to rebase onto ${CYAN}${TARGET}${RESET}:"
+
+  # Show each root with a short log line
+  while IFS= read -r root_id; do
+    local root_info
+    root_info="$(jj log -r "$root_id" --no-graph -T 'change_id.shortest(8) ++ " " ++ bookmarks.map(|b| b.name()).join(", ") ++ " " ++ description.first_line()' --limit 1 2>/dev/null)" || true
+    echo "  ${DIM}${root_info}${RESET}"
+  done <<< "$roots"
+  echo ""
+
+  local root_revset
+  root_revset="$(echo "$roots" | paste -sd '|' -)"
+
+  step_header "3/3" "Rebase onto latest main (empty commits from merged PRs are dropped)"
+  show_cmd "jj rebase -s '${root_revset}' -d ${TARGET} --skip-emptied"
+  run_dimmed jj rebase -s "$root_revset" -d "$TARGET" --skip-emptied
+
+  echo ""
+  echo "${GREEN}Done.${RESET} Current state:"
+  echo ""
+  jj log -r '@ | main.. | main' --limit 10
+  echo ""
+
+  if [ -n "$before_op" ]; then
+    echo "${DIM}Hint: To undo the entire rebase (fetch + rebase), run:${RESET}"
+    echo "${DIM}  jj op restore ${before_op}${RESET}"
+    echo ""
+  fi
+
+  local ans
+  read -r -p "Push updated bookmarks to remote? [y/N] " ans </dev/tty
+  case "$ans" in
+    y|Y) cmd_sync ;;
+    *) echo "Skipping push." ;;
+  esac
+}
+
+# ── land ──────────────────────────────────────────────────────────────────────
+
+land_usage() {
+  echo "Usage: jj-stack land <pr-number-or-url>"
+  echo ""
+  echo "Land a GitHub PR via squash merge and clean up local jj state."
+  echo ""
+  echo "Arguments:"
+  echo "  <pr-number-or-url>  PR number (e.g. 123) or GitHub PR URL"
+  exit 1
+}
+
+parse_pr_number() {
+  local input="$1"
+
+  if [[ "$input" =~ ^[0-9]+$ ]]; then
+    echo "$input"
+    return
+  fi
+
+  if [[ "$input" =~ /pull/([0-9]+)(/.*)?$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+    return
+  fi
+
+  echo "Error: Could not parse PR number from '$input'" >&2
+  echo "Expected a number (e.g. 123) or a GitHub PR URL" >&2
+  exit 1
+}
+
+fetch_pr_details() {
+  local pr_number="$1"
+  gh pr view "$pr_number" --json number,state,headRefName,title,url,baseRefName
+}
+
+check_pr_is_open() {
+  local pr_json="$1"
+  local state
+  state="$(echo "$pr_json" | jq -r '.state')"
+
+  case "$state" in
+    OPEN) return 0 ;;
+    MERGED)
+      echo "Error: PR #$(echo "$pr_json" | jq -r '.number') has already been merged." >&2
+      exit 1
+      ;;
+    CLOSED)
+      echo "Error: PR #$(echo "$pr_json" | jq -r '.number') is closed." >&2
+      exit 1
+      ;;
+    *)
+      echo "Error: PR #$(echo "$pr_json" | jq -r '.number') is in unexpected state: $state" >&2
+      exit 1
+      ;;
+  esac
+}
+
+check_base_branch() {
+  local pr_json="$1"
+  local base
+  base="$(echo "$pr_json" | jq -r '.baseRefName')"
+
+  # Allow landing PRs that target main or any bookmark in main..
+  # (stacked PRs target other bookmarks as their base)
+  if [ "$base" = "$TARGET_BRANCH" ]; then
+    return 0
+  fi
+
+  # Check if base is a bookmark in main..
+  local bookmarks
+  bookmarks="$(get_bookmarks_off_main)"
+  if echo "$bookmarks" | grep -qx "$base"; then
+    return 0
+  fi
+
+  echo "Error: PR targets '$base', which is not 'main' or a known stacked bookmark." >&2
+  exit 1
+}
+
+check_squash_merge_allowed() {
+  local allow_squash
+  allow_squash="$(gh api repos/{owner}/{repo} --jq '.allow_squash_merge')"
+
+  if [ "$allow_squash" != "true" ]; then
+    echo "Error: Squash merge is not allowed on this repository." >&2
+    echo "jj-stack land only supports squash merge." >&2
+    exit 1
+  fi
+}
+
+check_bookmark_exists() {
+  local bookmark="$1"
+
+  if ! jj bookmark list "$bookmark" 2>/dev/null | grep -q .; then
+    echo "Error: Local jj bookmark '$bookmark' not found." >&2
+    echo "Make sure you have the bookmark locally before landing." >&2
+    exit 1
+  fi
+}
+
+show_land_preview() {
+  local pr_json="$1"
+  local bookmark="$2"
+  local title number url
+  title="$(echo "$pr_json" | jq -r '.title')"
+  number="$(echo "$pr_json" | jq -r '.number')"
+  url="$(echo "$pr_json" | jq -r '.url')"
+
+  echo ""
+  echo "${BOLD}=== jj-stack land ===${RESET}"
+  echo ""
+  echo "  PR:       ${BOLD}#${number}${RESET} - ${title}"
+  echo "  URL:      ${CYAN}${url}${RESET}"
+  echo "  Bookmark: ${CYAN}${bookmark}${RESET}"
+  echo "  Action:   Squash merge into main"
+  echo ""
+  echo "Commits to be landed (${TARGET}..${bookmark}):"
+  echo ""
+  jj log -r "${TARGET}..${bookmark}"
+  echo ""
+}
+
+confirm() {
+  local prompt="${1:-Proceed?}"
+  local ans
+  read -r -p "${prompt} [y/N] " ans </dev/tty
+  case "$ans" in
+    y|Y) return 0 ;;
+    *)
+      echo "Aborted."
+      exit 0
+      ;;
+  esac
+}
+
+land_pr() {
+  local pr_number="$1"
+  local bookmark="$2"
+  local step=0
+
+  # Capture the operation ID before we start, so we can offer a single
+  # restore command that undoes everything if needed.
+  local before_op
+  before_op="$(jj op log --no-graph -T 'self.id().short() ++ "\n"' --limit 1 2>/dev/null)" || true
+
+  # Capture the root change IDs of the PR commits BEFORE merging/fetching.
+  # After fetch, jj may delete the local bookmark (because the remote branch
+  # gets deleted), which would make the revset unresolvable.
+  local pr_roots
+  pr_roots="$(jj log -r "roots(${TARGET}..${bookmark})" --no-graph -T 'change_id ++ "\n"' 2>/dev/null)"
+
+  # Retarget any open PRs that use this branch as their base to main instead.
+  # Without this, deleting the branch after merge would auto-close stacked PRs.
+  local dependent_prs dependent_branches
+  dependent_prs="$(gh pr list --base "$bookmark" --json number,headRefName 2>/dev/null || true)"
+  dependent_branches="$(echo "$dependent_prs" | jq -r '.[].headRefName' 2>/dev/null || true)"
+  if [ -n "$dependent_branches" ]; then
+    step=$((step + 1))
+    step_header "$step" "Retarget dependent PRs to main (so they aren't auto-closed)"
+    local dep_numbers
+    dep_numbers="$(echo "$dependent_prs" | jq -r '.[].number' 2>/dev/null)"
+    while IFS= read -r dep_pr; do
+      show_cmd "gh pr edit $dep_pr --base main"
+      run_dimmed gh pr edit "$dep_pr" --base main
+    done <<< "$dep_numbers"
+    echo ""
+  fi
+
+  # Squash merge the PR on GitHub
+  step=$((step + 1))
+  step_header "$step" "Squash merge PR #${pr_number} on GitHub"
+  show_cmd "gh pr merge $pr_number --squash"
+  run_dimmed gh pr merge "$pr_number" --squash
+  echo ""
+
+  # Delete the remote branch
+  step=$((step + 1))
+  step_header "$step" "Delete remote branch '${bookmark}'"
+  show_cmd "gh api repos/{owner}/{repo}/git/refs/heads/${bookmark} -X DELETE"
+  run_dimmed gh api "repos/{owner}/{repo}/git/refs/heads/${bookmark}" -X DELETE 2>/dev/null || true
+  echo ""
+
+  # Fetch the new squash commit into the local jj repo
+  step=$((step + 1))
+  step_header "$step" "Fetch the squash commit from remote"
+  show_cmd "jj git fetch"
+  run_dimmed jj git fetch
+  echo ""
+
+  # Rebase descendants onto the updated main. PR commits become empty
+  # (their content is now in the squash commit) and --skip-emptied removes them.
+  # However, jj git fetch may have already abandoned the commits and rebased
+  # descendants (when it detects the remote branch was deleted), so check first.
+  if [ -n "$pr_roots" ]; then
+    local root_revset
+    root_revset="$(echo "$pr_roots" | paste -sd '|' -)"
+    if jj log -r "$root_revset" --no-graph -T '' --limit 1 2>/dev/null; then
+      step=$((step + 1))
+      step_header "$step" "Rebase local commits onto updated main (empty commits from merged PR are dropped)"
+      show_cmd "jj rebase -s '${root_revset}' -d ${TARGET} --skip-emptied"
+      run_dimmed jj rebase -s "$root_revset" -d "${TARGET}" --skip-emptied
+      echo ""
+    else
+      echo "${DIM}  Skipping rebase — fetch already cleaned up the landed commits${RESET}"
+      echo ""
+    fi
+  fi
+
+  # Push updated bookmarks for any dependent (stacked) PRs so GitHub sees
+  # the rebased commits and shows the correct diff.
+  if [ -n "$dependent_branches" ]; then
+    step=$((step + 1))
+    step_header "$step" "Push updated bookmarks for dependent PRs"
+    while IFS= read -r dep_branch; do
+      show_cmd "jj git push --bookmark $dep_branch --allow-new"
+      run_dimmed jj git push --bookmark "$dep_branch" --allow-new
+    done <<< "$dependent_branches"
+    echo ""
+  fi
+
+  # Delete the local bookmark if it still exists (fetch may have already removed it)
+  if jj bookmark list "$bookmark" 2>/dev/null | grep -q .; then
+    step=$((step + 1))
+    step_header "$step" "Clean up local bookmark '${bookmark}'"
+    show_cmd "jj bookmark delete $bookmark"
+    run_dimmed jj bookmark delete "$bookmark"
+    echo ""
+  fi
+
+  if [ -n "$before_op" ]; then
+    echo "${DIM}Hint: To undo all local changes from this land, run:${RESET}"
+    echo "${DIM}  jj op restore ${before_op}${RESET}"
+    echo ""
+  fi
+}
+
+show_land_summary() {
+  local pr_number="$1"
+  echo "${GREEN}=== Done ===${RESET}"
+  echo "PR #${pr_number} squash-merged into main."
+  echo ""
+  jj log -r '@ | main.. | main' --limit 5
+}
+
+cmd_land() {
+  if [ $# -lt 1 ]; then
+    land_usage
+  fi
+
+  check_deps jj gh jq
+
+  local pr_number
+  pr_number="$(parse_pr_number "$1")"
+
+  echo "${DIM}Fetching PR #${pr_number} details...${RESET}"
+  local pr_json
+  pr_json="$(fetch_pr_details "$pr_number")"
+
+  check_pr_is_open "$pr_json"
+  check_base_branch "$pr_json"
+  check_squash_merge_allowed
+
+  local bookmark
+  bookmark="$(echo "$pr_json" | jq -r '.headRefName')"
+
+  check_bookmark_exists "$bookmark"
+  show_land_preview "$pr_json" "$bookmark"
+  confirm "Proceed with squash merge?"
+
+  land_pr "$pr_number" "$bookmark"
+  show_land_summary "$pr_number"
+}
+
+# ── Main dispatch ─────────────────────────────────────────────────────────────
+
+main() {
+  if [ $# -lt 1 ]; then
+    usage
+  fi
+
+  local cmd="$1"
+  shift
+
+  case "$cmd" in
+    create)  cmd_create "$@" ;;
+    list)    cmd_list "$@" ;;
+    status)  cmd_status "$@" ;;
+    sync)    cmd_sync "$@" ;;
+    rebase)  cmd_rebase "$@" ;;
+    land)    cmd_land "$@" ;;
+    -h|--help|help) usage ;;
+    *)
+      echo "Unknown command: $cmd" >&2
+      usage
+      ;;
+  esac
+}
+
+main "$@"

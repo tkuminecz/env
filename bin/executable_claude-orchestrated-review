@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+tmp_pre=$(mktemp)
+tmp_custom=$(mktemp)
+tmp_risk=$(mktemp)
+trap 'rm -f "$tmp_pre" "$tmp_custom" "$tmp_risk"' EXIT
+
+echo "Starting pre-review..."
+claude -p "Give me an overview and walkthrough of this PR. Give me a very brief TLDR and also help me understand how it works high level, areas to focus my review on, etc. Walk me through the code changes from a high-level. Diagrams are welcome but definitely dont make sense in all cases. Use your best judgement, and make sure to include them in your output." >"$tmp_pre" &
+pid_pre=$!
+wait "$pid_pre"
+out_pre=$(<"$tmp_pre")
+echo "Done with pre-review."
+
+echo "Starting custom review..."
+claude -p "Help me review this PR, especially identifyig new or changing patterns, subtle or hard to identify problems, antipatterns, code smells, closed-door decisions, etc. Be thorough. Only review changes introduced in this PR." >"$tmp_custom" &
+pid_custom=$!
+
+echo "Starting risk analysis..."
+claude -p "Review this PR and give me your analysis on risk level and blast radius of the changes." >"$tmp_risk" &
+pid_risk=$!
+
+wait "$pid_custom" "$pid_risk"
+
+out_custom=$(<"$tmp_custom")
+echo "Done with custom review."
+
+out_risk=$(<"$tmp_risk")
+echo "Done with risk analysis."
+
+echo "Starting final review..."
+claude "/github-review-pr $1\n\n---\n\nand incorporate the following feedback from other agents:\n\n${out_pre}\n\n${out_custom}\n\n${out_risk}\n\n---\n\nfinally, for each finding, spawn a subagent (using sonnet) to double check it. The final report should have each finding numbered, starting from 1 and globally unique (don't repeat finding numbers in each section)."

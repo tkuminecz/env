@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+TMUX_CMD="${TMUX_CMD:-tmux}"
+
+# Auto-detect iTerm2 and default to -CC (control mode) for native integration.
+# LC_TERMINAL survives inside tmux sessions where TERM_PROGRAM gets overwritten.
+if [ -z "${TMUX_OPTS+x}" ]; then
+  case "${LC_TERMINAL:-${TERM_PROGRAM:-}}" in
+    iTerm2|iTerm.app) TMUX_OPTS="-CC" ;;
+    *) TMUX_OPTS="" ;;
+  esac
+fi
+
+# Return 0 if session exists
+session_exists() {
+  "$TMUX_CMD" has-session -t "$1" 2>/dev/null
+}
+
+# FZF picker for sessions, with option to create new
+pick_session() {
+  # List existing sessions by name, one per line
+  local sessions
+  sessions="$("$TMUX_CMD" list-sessions -F '#S' 2>/dev/null || true)"
+
+  # If there are no sessions, just prompt for a new name
+  if [ -z "$sessions" ]; then
+    read -r -p "Session name: " name < /dev/tty
+    echo "$name"
+    return
+  fi
+
+  # Use fzf to select or type a new name
+  # --print-query lets you type a new name and hit enter
+  local out query selection
+  out="$(printf '%s\n' "$sessions" | fzf --prompt='tele> ' --print-query --header='Type new name or pick existing')"
+  query="$(printf '%s\n' "$out" | sed -n '1p')"
+  selection="$(printf '%s\n' "$out" | sed -n '2p')"
+
+  if [ -n "$query" ] && [ "$query" != "$selection" ]; then
+    # User typed something that isn't exactly an existing session
+    echo "$query"
+  else
+    # User picked an existing session
+    echo "$selection"
+  fi
+}
+
+# FZF picker for root directory
+pick_directory() {
+  local out query selection dirs
+
+  # List directories, excluding hidden ones
+  if command -v fd &>/dev/null; then
+    dirs="$(fd . --type d --max-depth 3 --exclude '.*' "$HOME" 2>/dev/null || true)"
+  else
+    dirs="$(find "$HOME" -maxdepth 3 -type d -not -path '*/.*' 2>/dev/null || true)"
+  fi
+
+
+  if [ -z "$dirs" ]; then
+    read -r -p "Root directory: " name < /dev/tty
+    echo "$name"
+    return
+  fi
+
+  out="$(printf '%s\n' "$dirs" | fzf --prompt='dir> ' --print-query --header='Type path or pick directory')" || true
+  query="$(printf '%s\n' "$out" | sed -n '1p')"
+  selection="$(printf '%s\n' "$out" | sed -n '2p')"
+
+  # Prefer the selected item (absolute path from the list);
+  # fall back to the typed query only if nothing was selected
+  if [ -n "$selection" ]; then
+    echo "$selection"
+  elif [ -n "$query" ]; then
+    echo "$query"
+  fi
+}
+
+# Get the current session name (empty if not inside tmux)
+current_session() {
+  if [ -n "${TMUX:-}" ]; then
+    "$TMUX_CMD" display-message -p '#S'
+  fi
+}
+
+# Attach or switch to given session name, creating if needed
+teleport_to_session() {
+  local target="$1"
+
+  if session_exists "$target"; then
+    # Check if we're already attached to the target session
+    local current
+    current="$(current_session)"
+    if [ "$current" = "$target" ]; then
+      read -r -p "Already attached to session '$target'. Re-attach? [y/N] " ans < /dev/tty || true
+      case "$ans" in
+        y|Y) ;;
+        *) return 0 ;;
+      esac
+    fi
+
+    # Session exists
+    if [ -n "${TMUX:-}" ]; then
+      # Already inside tmux: switch the current client to the target session
+      "$TMUX_CMD" switch-client -t "$target"
+    else
+      # Not in tmux: check if another client is already attached
+      local clients
+      clients="$("$TMUX_CMD" list-clients -t "$target" -F '#{client_tty}' 2>/dev/null || true)"
+      if [ -n "$clients" ]; then
+        echo "Session '$target' already has attached client(s):"
+        echo "$clients"
+        read -r -p "Attach anyway (may cause conflicts with iTerm2)? [y/N] " ans < /dev/tty || true
+        case "$ans" in
+          y|Y) ;;
+          *) echo "Aborted."; return 0 ;;
+        esac
+      fi
+      TMUX= exec $TMUX_CMD $TMUX_OPTS attach-session -t "$target"
+    fi
+  else
+    # Session does not exist: ask to create
+    local ans=""
+    read -r -p "Session '$target' does not exist. Create it? [Y/n] " ans < /dev/tty || true
+    case "$ans" in
+      n|N) echo "Aborted."; return 0 ;;
+      *)
+        # Pick root directory for the new session
+        local dir
+        dir="$(pick_directory)" || true
+        if [ -z "$dir" ]; then
+          echo "Aborted."; return 0
+        fi
+
+        # Expand ~ if present
+        dir="${dir/#\~/$HOME}"
+
+        # Resolve relative paths to absolute
+        if [[ "$dir" != /* ]]; then
+          dir="$(cd "$dir" 2>/dev/null && pwd || echo "$PWD/$dir")"
+        fi
+
+        # Create directory if it doesn't exist
+        if [ ! -d "$dir" ]; then
+          local dans=""
+          read -r -p "Directory '$dir' does not exist. Create it? [Y/n] " dans < /dev/tty || true
+          case "$dans" in
+            n|N) echo "Aborted."; return 0 ;;
+            *) mkdir -p "$dir" ;;
+          esac
+        fi
+
+        if [ -n "${TMUX:-}" ]; then
+          # Inside tmux: create detached, then switch to it
+          "$TMUX_CMD" new-session -d -s "$target" -c "$dir"
+          "$TMUX_CMD" switch-client -t "$target"
+        else
+          # Outside tmux: create & attach in one shot
+          exec $TMUX_CMD $TMUX_OPTS new-session -s "$target" -c "$dir"
+        fi
+        ;;
+    esac
+  fi
+}
+
+main() {
+  local target
+
+  if [ $# -ge 1 ]; then
+    target="$1"
+  else
+    target="$(pick_session || true)"
+    if [ -z "${target:-}" ]; then
+      echo "No session selected."
+      exit 1
+    fi
+  fi
+
+  teleport_to_session "$target"
+}
+
+main "$@"

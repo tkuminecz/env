@@ -1,0 +1,62 @@
+// Zed settings
+//
+// For information on how to configure Zed, see the Zed
+// documentation: https://zed.dev/docs/configuring-zed
+//
+// To see all of Zed's default settings without changing your
+// custom settings, run `zed: open default settings` from the
+// command palette (cmd-shift-p / ctrl-shift-p)
+{
+  "cli_default_open_behavior": "new_window",
+  "terminal": {
+    "font_size": 12.0,
+    "font_family": "JetBrainsMono Nerd Font Mono"
+  },
+  "project_panel": {
+    "dock": "left"
+  },
+  "outline_panel": {
+    "dock": "left"
+  },
+  "collaboration_panel": {
+    "dock": "left"
+  },
+  "agent": {
+    "dock": "right",
+    "favorite_models": [],
+    "model_parameters": []
+  },
+  "git": {
+    "disable_git": false
+  },
+  "scrollbar": {
+    "git_diff": true
+  },
+  "git_panel": {
+    "dock": "left",
+    "tree_view": true
+  },
+  "buffer_font_weight": 400.0,
+  "buffer_font_family": "Fira Code",
+  "telemetry": {
+    "diagnostics": true,
+    "metrics": false,
+  },
+  "icon_theme": {
+    "mode": "system",
+    "light": "Zed (Default)",
+    "dark": "Zed (Default)",
+  },
+  "ui_font_size": 14.0,
+  "buffer_font_size": 11.0,
+  "theme": {
+    "mode": "dark",
+    "light": "Catppuccin Iced Latte (Blur)",
+    "dark": "Monokai Pro (CE)",
+  },
+  "languages": {
+    "Python": {
+      "language_servers": ["ty", "!basedpyright", "..."],
+    },
+  },
+}

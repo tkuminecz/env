@@ -1,0 +1,3 @@
+# Profile settings for claude-container.
+# sudo: grant passwordless sudo inside the container (default: false)
+sudo = false

@@ -1,0 +1,3 @@
+{{- $secrets := promptBoolOnce . "secrets" "Enable 1Password-backed secrets (requires op CLI signed in)" false -}}
+[data]
+    secrets = {{ $secrets }}

@@ -1,0 +1,16 @@
+# repo housekeeping — never deploy these to $HOME
+README.md
+legacy
+
+# secrets-backed files are only managed once 1Password CLI is set up
+# (flip `secrets = true` in ~/.config/chezmoi/chezmoi.toml, re-run `chezmoi init`)
+{{ if not .secrets }}
+.npmrc
+{{ end }}
+
+# macOS-only targets
+{{ if ne .chezmoi.os "darwin" }}
+.Brewfile
+.config/karabiner
+Library
+{{ end }}

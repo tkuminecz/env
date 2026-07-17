@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+_CLAUDE_CMD="${CLAUDE_CMD:-claude}"
+
+$_CLAUDE_CMD mcp add --transport http linear-server https://mcp.linear.app/mcp
+$_CLAUDE_CMD mcp add --transport http sentry https://mcp.sentry.dev/mcp
+$_CLAUDE_CMD mcp add --transport http notion https://mcp.notion.com/mcp

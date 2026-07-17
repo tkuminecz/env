@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+# Rename the ~/.kube/config file based on its cluster name
+
+set -e
+
+KUBECONFIG_FILE="$HOME/.kube/config"
+
+if ! command -v yq >/dev/null 2>&1; then
+  echo "Error: 'yq' is required but not installed. Please install yq to run this script."
+  exit 1
+fi
+
+if [[ ! -f "$KUBECONFIG_FILE" ]]; then
+  echo "Error: Default kubeconfig file '$KUBECONFIG_FILE' does not exist."
+  exit 1
+fi
+
+# Extract cluster name from kubeconfig file
+CLUSTER_NAME=$(yq e '.clusters[0].name' "$KUBECONFIG_FILE")
+
+if [[ -z "$CLUSTER_NAME" ]]; then
+  echo "Error: Unable to extract cluster name from kubeconfig."
+  exit 1
+fi
+
+NEW_PATH="$HOME/.kube/${CLUSTER_NAME}-config.yaml"
+
+# Move/rename the kubeconfig file only if the target name is different
+if [[ "$KUBECONFIG_FILE" != "$NEW_PATH" ]]; then
+  mv "$KUBECONFIG_FILE" "$NEW_PATH"
+  echo "Renamed ${KUBECONFIG_FILE} file to $NEW_PATH"
+else
+  echo "Kubeconfig file already named correctly: $NEW_PATH"
+fi
+

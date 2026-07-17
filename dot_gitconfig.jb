@@ -1,0 +1,9 @@
+[user]
+	name = Tim Kuminecz
+	email = tkuminecz@justicebid.com
+	signingkey = A0F6D574AD5C195D
+[commit]
+	gpgsign = true
+[tag]
+	gpgSign = true
+

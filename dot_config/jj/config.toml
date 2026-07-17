@@ -1,0 +1,69 @@
+#:schema https://docs.jj-vcs.dev/latest/config-schema.json
+
+[user]
+name = "Tim Kuminecz"
+email = "tkuminecz@gmail.com"
+
+
+[ui]
+editor = "nvim"
+
+# Delta diff
+#pager = "delta"
+#diff-formatter = ":git"
+
+# Difftastic
+#diff-formatter = ["difft", "--display=inline", "--color=always", "$left", "$right"]
+#diff-formatter = ["difft", "--color=always", "$left", "$right"]
+
+
+[colors]
+"log commit immutable bookmarks name" = { fg = "blue", bg = "white", bold = true, underline = true }
+
+
+[revset-aliases]
+"bookmark_tips()" = "bookmarks() & heads(::)"
+"my_unmerged()" = "mine() & ~::trunk()"
+"revsets.log" = "(present(@)  | ancestors(immutable_heads().., 2)    | present(trunk())  )  & (trunk() | mine() | bookmarks())"
+
+
+[aliases]
+b = ["bookmark"]
+d = ["diff"]
+df = ["diff", "--stat"]
+dw = ["diff", "--color-words"]
+s = ["status"]
+l = ["log", "-r", "revsets.log"]
+lf = ["log"]
+ws = ["workspace"]
+wt = ["util", "exec", "--", "jjwt"]
+stk = ["util", "exec", "--", "cake"]
+spr = ["util", "exec", "--", "jj-spr"]
+
+
+[template-aliases]
+# Show all timestamps as relative time
+"format_timestamp(timestamp)" = "timestamp.ago()"
+'format_short_signature(signature)' = '''
+coalesce(
+    if(signature.email() == config("user.email").as_string(), "<me>"),
+    signature.email()
+)
+'''
+
+
+[gg.ui]
+recent-workspaces = ["/Users/tim/projects/bin", "/Users/tim/projects/pageantry"]
+
+
+# JusticeBid config
+
+
+[[--scope]]
+--when.repositories = ["~/jb/"]
+user.name = "Tim Kuminecz"
+user.email = "tkuminecz@justicebid.com"
+signing.sign-all = true
+signing.backend = "gpg"
+signing.key = "A0F6D574AD5C195D"
+

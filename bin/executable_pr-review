@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# pr-review — single-command PR code review pipeline
+#
+# Creates a tmux session with a git worktree for the PR, then runs three
+# Claude review steps sequentially in a dedicated window:
+#   1. overview        — PR overview (claude-container -p)
+#   2. review          — detailed review feedback (claude-container -p)
+#   3. comprehensive   — /github:review-pr skill fed prior analysis
+#
+# Produces a single markdown review document.
+
+SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+TMUX_CMD="${TMUX_CMD:-tmux}"
+TMUX_OPTS="${TMUX_OPTS:-}"
+
+# ---------------------------------------------------------------------------
+# Color helpers
+# ---------------------------------------------------------------------------
+if [ -t 1 ]; then
+  bold='\033[1m' dim='\033[2m' green='\033[32m' yellow='\033[33m' red='\033[31m' reset='\033[0m'
+else
+  bold='' dim='' green='' yellow='' red='' reset=''
+fi
+
+# ---------------------------------------------------------------------------
+# Usage
+# ---------------------------------------------------------------------------
+usage() {
+  cat <<'EOF'
+Usage: pr-review <pr-number> [options]
+
+Creates a tmux session with a worktree for the PR, then runs sequential
+Claude review steps in a dedicated window. Produces a single review document.
+
+Options:
+  -h, --help    Show this help
+
+Environment:
+  CLAUDE_CMD     Claude command (default: claude-container)
+  CLAUDE_ARGS    Extra args for every claude invocation
+  PLATFORM_DIR   Repo directory (default: ~/jb/platform)
+EOF
+  exit "${1:-0}"
+}
+
+# ---------------------------------------------------------------------------
+# Internal: run the full review pipeline (called by tmux window)
+# ---------------------------------------------------------------------------
+run_pipeline() {
+  local pr="$1" review_dir="$2"
+  local claude="${CLAUDE_CMD:-claude-container}"
+
+  if ! command -v "$claude" &>/dev/null; then
+    printf "${red}Error: %s not found in PATH${reset}\n" "$claude"
+    printf "PATH=%s\n" "$PATH"
+    return 1
+  fi
+
+  local pr_title pr_url
+  pr_title=$(gh pr view "$pr" --json title -q .title)
+  pr_url=$(gh pr view "$pr" --json url -q .url)
+
+  printf "${bold}PR #%s: %s${reset}\n" "$pr" "$pr_title"
+  printf "${dim}%s${reset}\n\n" "$pr_url"
+
+  # --- Step 1: Overview ---------------------------------------------------
+  printf "${bold}[1/3] Generating overview...${reset}\n\n"
+  # shellcheck disable=SC2086
+  "$claude" -- ${CLAUDE_ARGS:-} -p \
+    "Generate a comprehensive overview of PR #$pr. \
+Use \`gh pr view $pr\` to read the description and metadata, \
+and \`gh pr diff $pr\` to examine the code changes. \
+Describe what the PR changes, which areas of the codebase are affected, \
+the approach taken, and any notable design decisions. Output clean markdown." \
+    > "$review_dir/overview.md"
+  printf "\n${green}[1/3] Overview complete.${reset}\n\n"
+
+  # --- Step 2: Detailed review --------------------------------------------
+  printf "${bold}[2/3] Generating detailed review...${reset}\n\n"
+  # shellcheck disable=SC2086
+  "$claude" -- ${CLAUDE_ARGS:-} -p \
+    "Help me review PR #$pr, especially identifying new or changing \
+patterns, subtle or hard to identify problems, antipatterns, code smells, \
+closed-door decisions, security concerns, and edge cases. Be thorough. \
+Only review changes introduced by this PR. \
+Use \`gh pr view $pr\` and \`gh pr diff $pr\` to examine changes. \
+Check what branch this PR is targeting and use git diff to see the changes. \
+Output clean markdown." \
+    > "$review_dir/review.md"
+  printf "\n${green}[2/3] Review complete.${reset}\n\n"
+
+  # --- Step 3: Comprehensive review ---------------------------------------
+  printf "${bold}[3/3] Generating comprehensive review...${reset}\n\n"
+
+  local overview review
+  overview=$(<"$review_dir/overview.md")
+  review=$(<"$review_dir/review.md")
+
+  # shellcheck disable=SC2086
+  "$claude" -- ${CLAUDE_ARGS:-} -p "/github:review-pr $pr
+
+Incorporate the following prior analysis into your review:
+
+## Overview
+$overview
+
+## Detailed Review Findings
+$review" \
+    > "$review_dir/comprehensive.md"
+  printf "\n${green}[3/3] Comprehensive review complete.${reset}\n\n"
+
+  # --- Assemble final document --------------------------------------------
+  local comprehensive
+  comprehensive=$(<"$review_dir/comprehensive.md")
+
+  local output_file="$review_dir/review-pr-${pr}.md"
+  cat > "$output_file" <<FINAL
+# PR #$pr: $pr_title
+
+$pr_url
+
+## Overview
+
+$overview
+
+## Review Findings
+
+$comprehensive
+FINAL
+
+  printf "${green}Review written to:${reset} ${bold}%s${reset}\n" "$output_file"
+}
+
+# ---------------------------------------------------------------------------
+# Handle internal __pipeline subcommand (called by tmux window)
+# ---------------------------------------------------------------------------
+if [[ "${1:-}" == "__pipeline" ]]; then
+  shift
+  run_pipeline "$@"
+  exit $?
+fi
+
+# ---------------------------------------------------------------------------
+# Main: parse arguments
+# ---------------------------------------------------------------------------
+PR_NUMBER=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage 0 ;;
+    -*)        echo "Unknown option: $1"; usage 1 ;;
+    *)
+      if [[ -z "$PR_NUMBER" ]]; then
+        PR_NUMBER="$1"; shift
+      else
+        echo "Unexpected argument: $1"; usage 1
+      fi
+      ;;
+  esac
+done
+
+[[ -z "$PR_NUMBER" ]] && { echo "Error: PR number required"; usage 1; }
+
+CLAUDE="${CLAUDE_CMD:-claude-container}"
+PLATFORM_DIR="${PLATFORM_DIR:-$HOME/jb/platform}"
+
+for cmd in "$CLAUDE" gh git; do
+  command -v "$cmd" &>/dev/null || { echo "Error: $cmd not found"; exit 1; }
+done
+
+# ---------------------------------------------------------------------------
+# Work from the platform repo so gh resolves the correct repository
+# ---------------------------------------------------------------------------
+cd "$PLATFORM_DIR"
+
+# ---------------------------------------------------------------------------
+# Get PR metadata
+# ---------------------------------------------------------------------------
+printf "${bold}Fetching PR #%s...${reset}\n" "$PR_NUMBER"
+
+PR_TITLE=$(gh pr view "$PR_NUMBER" --json title -q .title) || {
+  echo "Error: could not fetch PR #$PR_NUMBER"
+  exit 1
+}
+PR_BRANCH=$(gh pr view "$PR_NUMBER" --json headRefName -q .headRefName)
+PR_URL=$(gh pr view "$PR_NUMBER" --json url -q .url)
+
+printf "  %s\n" "$PR_TITLE"
+printf "  ${dim}%s${reset}\n\n" "$PR_URL"
+
+# ---------------------------------------------------------------------------
+# Create worktree for PR branch
+# ---------------------------------------------------------------------------
+WORKTREE_DIR="${PLATFORM_DIR}-pr-${PR_NUMBER}"
+
+if [ -d "$WORKTREE_DIR" ]; then
+  printf "Worktree exists: %s\n" "$WORKTREE_DIR"
+else
+  printf "Creating worktree at %s\n" "$WORKTREE_DIR"
+  git -C "$PLATFORM_DIR" fetch origin "$PR_BRANCH"
+  git -C "$PLATFORM_DIR" worktree prune
+  git -C "$PLATFORM_DIR" worktree add "$WORKTREE_DIR" "origin/$PR_BRANCH"
+fi
+
+# Trust mise config in worktree to avoid noisy errors
+command -v mise &>/dev/null && mise trust "$WORKTREE_DIR/.mise.toml" 2>/dev/null || true
+
+# Review artifacts directory
+REVIEW_DIR="$WORKTREE_DIR/.pr-review"
+mkdir -p "$REVIEW_DIR"
+
+# ---------------------------------------------------------------------------
+# Create tmux session with pipeline window
+# ---------------------------------------------------------------------------
+SESSION="pr-review-${PR_NUMBER}"
+
+# Kill existing session for this PR (re-run scenario)
+"$TMUX_CMD" kill-session -t "$SESSION" 2>/dev/null || true
+
+printf "Creating tmux session: ${bold}%s${reset}\n\n" "$SESSION"
+
+# Build pipeline command
+cmd_pipeline=$(printf '%q __pipeline %q %q' \
+  "$SCRIPT_PATH" "$PR_NUMBER" "$REVIEW_DIR")
+
+# Window 0: shell (landing window for manual work)
+"$TMUX_CMD" new-session -d -s "$SESSION" -c "$WORKTREE_DIR" -n "shell"
+
+# Propagate env so tmux windows can find claude-container, gh, etc.
+"$TMUX_CMD" set-environment -t "$SESSION" PATH "$PATH"
+"$TMUX_CMD" set-environment -t "$SESSION" CLAUDE_CMD "$CLAUDE"
+[[ -n "${CLAUDE_ARGS:-}" ]] && "$TMUX_CMD" set-environment -t "$SESSION" CLAUDE_ARGS "$CLAUDE_ARGS"
+[[ -n "${GH_TOKEN:-}" ]] && "$TMUX_CMD" set-environment -t "$SESSION" GH_TOKEN "$GH_TOKEN"
+[[ -n "${GITHUB_TOKEN:-}" ]] && "$TMUX_CMD" set-environment -t "$SESSION" GITHUB_TOKEN "$GITHUB_TOKEN"
+[[ -n "${HOME:-}" ]] && "$TMUX_CMD" set-environment -t "$SESSION" HOME "$HOME"
+
+# Pipeline window: regular shell, then send the command into it
+"$TMUX_CMD" new-window -t "$SESSION" -n "pipeline" -c "$WORKTREE_DIR"
+"$TMUX_CMD" send-keys -t "$SESSION:pipeline" "$cmd_pipeline" Enter
+
+# Start user on the pipeline window to watch progress
+"$TMUX_CMD" select-window -t "$SESSION:pipeline"
+
+# Attach or switch
+if [ -n "${TMUX:-}" ]; then
+  "$TMUX_CMD" switch-client -t "$SESSION"
+else
+  exec $TMUX_CMD $TMUX_OPTS attach-session -t "$SESSION"
+fi

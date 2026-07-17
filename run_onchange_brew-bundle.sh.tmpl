@@ -1,0 +1,8 @@
+#!/bin/bash
+# Re-runs whenever the Brewfile changes (hash below is what triggers it).
+# Brewfile hash: {{ include "dot_Brewfile" | sha256sum }}
+{{ if eq .chezmoi.os "darwin" -}}
+set -euo pipefail
+echo "Brewfile changed — running brew bundle..."
+brew bundle --global --no-upgrade
+{{ end -}}

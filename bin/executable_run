@@ -1,0 +1,143 @@
+#!/usr/bin/env node
+
+const { spawnSync } = require('child_process');
+const { existsSync } = require('fs');
+const { resolve, dirname, join } = require('path');
+
+const COMMAND_NAME = 'proj'; // Change this to your preferred command name
+
+/**
+ * Find the repository root by walking up the directory tree
+ * looking for package.json
+ */
+function findRepoRoot(startPath = process.cwd()) {
+  let currentPath = resolve(startPath);
+  const root = resolve('/');
+
+  while (currentPath !== root) {
+    const packageJsonPath = join(currentPath, 'package.json');
+    if (existsSync(packageJsonPath)) {
+      return currentPath;
+    }
+    currentPath = dirname(currentPath);
+  }
+
+  return null;
+}
+
+/**
+ * Display help text
+ */
+function showHelp() {
+  console.log(`
+${COMMAND_NAME} - Run pnpm commands from anywhere in your monorepo
+
+Usage:
+  ${COMMAND_NAME} <command> [args...]
+
+This tool will:
+  1. Find your repository root (by locating package.json)
+  2. Try to execute ${COMMAND_NAME}-<command> if it exists in PATH
+  3. Fall back to running 'pnpm run <command>' from the repo root
+  4. If not a script, pass through to 'pnpm <command>'
+
+Examples:
+  ${COMMAND_NAME} build              # Run pnpm run build from repo root
+  ${COMMAND_NAME} test --watch       # Run pnpm run test --watch from repo root
+  ${COMMAND_NAME} install lodash     # Run pnpm install lodash from repo root
+  ${COMMAND_NAME} --filter web dev   # Run pnpm --filter web dev from repo root
+
+Custom commands:
+  You can create custom ${COMMAND_NAME}-* commands in your PATH.
+  For example, create ${COMMAND_NAME}-deploy, and run it with:
+    ${COMMAND_NAME} deploy
+
+Options:
+  -h, --help    Show this help message
+  `);
+}
+
+/**
+ * Main execution
+ */
+function main() {
+  const args = process.argv.slice(2);
+
+  // Handle help
+  if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
+    showHelp();
+    process.exit(0);
+  }
+
+  const subcommand = args[0];
+  const subcommandArgs = args.slice(1);
+
+  // Find repo root
+  const repoRoot = findRepoRoot();
+  if (!repoRoot) {
+    console.error(`Error: Could not find repository root (no package.json found)`);
+    console.error(`Searched from: ${process.cwd()}`);
+    process.exit(1);
+  }
+
+  // Try to execute external command proj-<subcommand>
+  const externalCommand = `${COMMAND_NAME}-${subcommand}`;
+  
+  // Use 'command -v' to check if command exists (POSIX-compatible)
+  const checkCommand = spawnSync('sh', ['-c', `command -v ${externalCommand}`], {
+    encoding: 'utf8',
+    stdio: 'pipe'
+  });
+
+  if (checkCommand.status === 0) {
+    // External command exists, run it
+    const result = spawnSync(externalCommand, subcommandArgs, {
+      cwd: repoRoot,
+      stdio: 'inherit',
+      shell: true
+    });
+    process.exit(result.status !== null ? result.status : 1);
+  }
+
+  // Fallback: try running as pnpm script
+  // First check if it looks like a pnpm script (heuristic: single word without dashes)
+  const packageJsonPath = join(repoRoot, 'package.json');
+  let isProbablyScript = false;
+  
+  try {
+    const packageJson = require(packageJsonPath);
+    if (packageJson.scripts && packageJson.scripts[subcommand]) {
+      isProbablyScript = true;
+    }
+  } catch (err) {
+    // If we can't read package.json, just try pnpm anyway
+  }
+
+  // If it's probably a script, use 'pnpm run'
+  // Otherwise, pass through directly to pnpm (for install, add, etc.)
+  let pnpmArgs;
+  if (isProbablyScript) {
+    pnpmArgs = ['run', subcommand, ...subcommandArgs];
+  } else {
+    pnpmArgs = args;
+  }
+
+  const pnpmResult = spawnSync('pnpm', pnpmArgs, {
+    cwd: repoRoot,
+    stdio: 'inherit'
+  });
+
+  if (pnpmResult.error) {
+    if (pnpmResult.error.code === 'ENOENT') {
+      console.error('Error: pnpm is not installed or not in PATH');
+      process.exit(1);
+    }
+    console.error(`Error executing pnpm: ${pnpmResult.error.message}`);
+    process.exit(1);
+  }
+
+  process.exit(pnpmResult.status !== null ? pnpmResult.status : 1);
+}
+
+main();
+

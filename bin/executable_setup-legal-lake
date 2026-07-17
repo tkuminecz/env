@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+mise run up:legal-lake
+mise run platform:directory:migrate
+mise run platform:directory:seed
+mise run rate-review:backend:migrate
+mise run legal-lake:ingestion:migrate
+sleep 60
+mise run legal-lake:migrate

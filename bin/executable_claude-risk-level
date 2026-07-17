@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+claude "Review this PR and give me your analysis on risk level and blast radius of the changes. Do not write your output to any file — give your full output directly in this session only." --permission-mode auto --model opus

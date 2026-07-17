@@ -1,0 +1,84 @@
+{
+  "includeCoAuthoredBy": false,
+  "permissions": {
+    "allow": [
+      "Read(*)",
+      "Search(*)",
+      "Edit(*)",
+      "Write(*)",
+      "Bash(ls *)",
+      "Bash(uv *)",
+      "Bash(ruff *)",
+      "Bash(mise *)",
+      "Bash(git *)",
+      "Bash(gh pr *)",
+      "Bash(curl *)",
+      "Bash(find *)"
+    ],
+    "deny": [],
+    "ask": [
+      "Bash(git push * --force*)",
+      "Bash(rm -rf *)",
+      "Bash(rm -r *)"
+    ]
+  },
+  "model": "claude-fable-5[1m]",
+  "enabledMcpjsonServers": [
+    "superset-test",
+    "superset-staging",
+    "superset-prod",
+    "langfuse-test",
+    "langfuse-staging",
+    "langfuse-prod",
+    "sentry",
+    "linear"
+  ],
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 {{ .chezmoi.homeDir }}/.claude/hooks/pre_tool_call.py"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '{{ .chezmoi.homeDir }}/.claude/hooks/herdr-agent-state.sh' session",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash {{ .chezmoi.homeDir }}/.claude/statusline.sh"
+  },
+  "enabledPlugins": {
+    "claude-hud@claude-hud": true,
+    "coderabbit@claude-plugins-official": true,
+    "superpowers@superpowers-marketplace": false
+  },
+  "extraKnownMarketplaces": {
+    "claude-hud": {
+      "source": {
+        "source": "github",
+        "repo": "jarrodwatts/claude-hud"
+      }
+    }
+  },
+  "effortLevel": "high",
+  "tui": "fullscreen",
+  "skipDangerousModePermissionPrompt": true,
+  "remoteControlAtStartup": false,
+  "agentPushNotifEnabled": true,
+  "skipAutoPermissionPrompt": true
+}
