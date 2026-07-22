@@ -87,6 +87,12 @@
     "OTEL_METRICS_EXPORTER": "otlp",
     "OTEL_LOGS_EXPORTER": "otlp",
     "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
+    {{- /* cutd runs on tim-dev; point at it over the network from every
+    other machine, and at localhost on tim-dev itself. */}}
+    {{- if eq .chezmoi.hostname "tim-dev" }}
     "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:8420"
+    {{- else }}
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://tim-dev:8420"
+    {{- end }}
   }
 }
