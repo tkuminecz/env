@@ -187,8 +187,8 @@ function up() {
 # golang
 if command -v go >/dev/null 2>&1; then export PATH="$PATH:$(go env GOPATH)/bin"; fi
 
-# fzf
-if command -v fzf >/dev/null 2>&1; then eval "$(fzf --zsh)"; fi
+# fzf (--zsh needs fzf >= 0.48; older versions just skip the keybindings)
+if command -v fzf >/dev/null 2>&1; then eval "$(fzf --zsh 2>/dev/null)"; fi
 
 # pnpm
 {{- if eq .chezmoi.os "darwin" }}
