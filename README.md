@@ -56,7 +56,9 @@ tokens never live in this repo. They are ignored until you opt in:
 
 ## Machines
 
-| Machine | OS | Status |
-|---|---|---|
-| MacBook | macOS | source of truth for initial import (2026-07) |
-| _(linux boxes)_ | Linux | pending hydration |
+| Machine | OS | Profile | Status |
+|---|---|---|---|
+| MacBook | macOS | personal (+ ~/jb scoped work identity) | hydrated 2026-07, secrets on |
+| tim-dev | Ubuntu 24.04 | personal | hydrated 2026-07 |
+| jb-dev | Ubuntu 24.04 | work (machine-wide jb identity + signing) | hydrated 2026-07 |
+| jb-dev2 | Ubuntu 24.04 | work (same signing key as jb-dev) | hydrated 2026-07 |
