@@ -1,6 +1,12 @@
 # repo housekeeping — never deploy these to $HOME
 README.md
 legacy
+machines
+
+# work machines get the jb identity in .gitconfig itself
+{{ if .work }}
+.gitconfig.jb
+{{ end }}
 
 # secrets-backed files are only managed once 1Password CLI is set up
 # (flip `secrets = true` in ~/.config/chezmoi/chezmoi.toml, re-run `chezmoi init`)

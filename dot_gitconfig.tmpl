@@ -12,19 +12,38 @@
 	s = status -uall -s
         unmerged = l origin/main..
 	clean = clean --exclude=.jj
+[init]
+	defaultBranch = main
+[url "git@github.com:"]
+	insteadOf = https://github.com/
+{{- if .work }}
+[user]
+	name = Tim Kuminecz
+	email = tkuminecz@justicebid.com
+{{- if .git_signing_key }}
+	signingkey = {{ .git_signing_key }}
+[gpg]
+	program = gpg
+[commit]
+	gpgsign = true
+[tag]
+	gpgSign = true
+{{- end }}
+{{- else }}
 [user]
 	name = Tim Kuminecz
 	email = tkuminecz@gmail.com
 [includeIf "gitdir:~/jb/"]
     path = ~/.gitconfig.jb
+{{- end }}
 [filter "lfs"]
 	process = git-lfs filter-process
 	required = true
 	clean = git-lfs clean -- %f
 	smudge = git-lfs smudge -- %f
 [credential "https://github.com"]
-	helper = 
+	helper =
 	helper = !{{ if eq .chezmoi.os "darwin" }}/opt/homebrew/bin/gh{{ else }}gh{{ end }} auth git-credential
 [credential "https://gist.github.com"]
-	helper = 
+	helper =
 	helper = !{{ if eq .chezmoi.os "darwin" }}/opt/homebrew/bin/gh{{ else }}gh{{ end }} auth git-credential

@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-claude "Help me review this PR, especially identifyig new or changing patterns, subtle or hard to identify problems, antipatterns, code smells, closed-door decisions, etc. Be thorough. Only review changes introduced in this PR. Do not write your output to any file — give your full output directly in this session only." --permission-mode auto --model opus

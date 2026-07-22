@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-claude "Give me an overview and walkthrough of this PR. Give me a very brief TLDR and also help me understand how it works high level, areas to focus my review on, etc. Walk me through the code changes from a high-level. Diagrams are welcome but definitely dont make sense in all cases. Use your best judgement, and make sure to include them in your output. Do not write your output to any file — give your full output directly in this session only." --permission-mode auto --model opus

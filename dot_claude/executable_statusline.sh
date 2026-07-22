@@ -17,8 +17,10 @@ CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/claude-statusline/config"
 : "${WORK_DOMAIN:=justicebid.com}"
 : "${CLAUDE_STATUSLINE_NODE:=}"
 
-# Portable mtime: BSD `stat -f`, else GNU `stat -c`, else 0 (treat as stale).
-mtime_of() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+# Portable mtime: GNU `stat -c`, else BSD `stat -f`, else 0 (treat as stale).
+# GNU must come first: on Linux, `stat -f %m` exits nonzero but still dumps
+# filesystem info to stdout, which pollutes the command substitution.
+mtime_of() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
 
 cols=$( { stty size </dev/tty; } 2>/dev/null | awk '{print $2}')
 export COLUMNS=$(( ${cols:-120} > 4 ? ${cols:-120} - 4 : 1 ))

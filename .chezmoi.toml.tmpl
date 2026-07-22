@@ -1,3 +1,10 @@
-{{- $secrets := promptBoolOnce . "secrets" "Enable 1Password-backed secrets (requires op CLI signed in)" false -}}
+{{- $secrets := promptBoolOnce . "secrets" "secrets" false -}}
+{{- $work := promptBoolOnce . "work" "work" false -}}
+{{- $gitSigningKey := promptStringOnce . "git_signing_key" "git_signing_key" -}}
+{{/* secrets: enable 1Password-backed files (requires op CLI signed in) */}}
+{{/* work: this is a JusticeBid work machine (work git identity machine-wide) */}}
+{{/* git_signing_key: this machine's GPG key id for jb commit signing ("" = no signing) */}}
 [data]
     secrets = {{ $secrets }}
+    work = {{ $work }}
+    git_signing_key = {{ $gitSigningKey | quote }}

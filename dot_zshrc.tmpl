@@ -85,7 +85,7 @@ ZSH_THEME="powerlevel10k/powerlevel10k"
 # Custom plugins may be added to $ZSH_CUSTOM/plugins/
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
-plugins=(docker docker-compose jj zsh-autosuggestions)
+plugins=(git docker docker-compose jj zsh-autosuggestions)
 
 source $ZSH/oh-my-zsh.sh
 
@@ -96,11 +96,11 @@ source $ZSH/oh-my-zsh.sh
 # You may need to manually set your language environment
 # export LANG=en_US.UTF-8
 
-# Preferred editor for local and remote sessions
-if [[ -n $SSH_CONNECTION ]]; then
-  export EDITOR='vim'
-else
+# Preferred editor
+if command -v nvim >/dev/null 2>&1; then
   export EDITOR='nvim'
+else
+  export EDITOR='vim'
 fi
 
 # Compilation flags
@@ -123,7 +123,32 @@ alias v="nvim"
 alias tn="tmux new-window"
 alias tv="tmux new-window nvim"
 
-{{- if eq .chezmoi.os "darwin" }}
+# eza
+if command -v eza >/dev/null 2>&1; then
+  alias ls='eza --group-directories-first --header --git'
+  alias ll='ls -al'
+fi
+
+# GPG pinentry
+export GPG_TTY=$(tty)
+
+# extra zsh completions
+[ -d "$HOME/.zfunc" ] && fpath=(~/.zfunc $fpath)
+
+# rust / cargo
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+
+# uv
+[ -f "$HOME/.local/bin/env" ] && . "$HOME/.local/bin/env"
+
+# fnm
+FNM_PATH="$HOME/.local/share/fnm"
+if [ -d "$FNM_PATH" ]; then
+  export PATH="$FNM_PATH:$PATH"
+  eval "$(fnm env --shell zsh)"
+fi
+
+{{ if eq .chezmoi.os "darwin" -}}
 alias jj-fzf="PATH=\"/opt/homebrew/bin:$PATH\" jj-fzf"
 {{- end }}
 
@@ -191,6 +216,7 @@ if command -v mise >/dev/null 2>&1; then eval "$(mise activate zsh)"; fi
 
 # Worktrunk
 if command -v wt >/dev/null 2>&1; then eval "$(command wt config shell init zsh)"; fi
+command -v wt >/dev/null 2>&1 && alias start-work="wt switch -c"
 
 # worktrunk tmux switching
 wtmux() {

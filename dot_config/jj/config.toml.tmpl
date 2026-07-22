@@ -53,17 +53,19 @@ coalesce(
 
 
 [gg.ui]
-recent-workspaces = ["/Users/tim/projects/bin", "/Users/tim/projects/pageantry"]
+recent-workspaces = ["{{ .chezmoi.homeDir }}/projects/bin", "{{ .chezmoi.homeDir }}/projects/pageantry"]
 
 
 # JusticeBid config
 
 
+{{- if .git_signing_key }}
 [[--scope]]
 --when.repositories = ["~/jb/"]
 user.name = "Tim Kuminecz"
 user.email = "tkuminecz@justicebid.com"
 signing.sign-all = true
 signing.backend = "gpg"
-signing.key = "A0F6D574AD5C195D"
+signing.key = "{{ .git_signing_key }}"
+{{- end }}
 

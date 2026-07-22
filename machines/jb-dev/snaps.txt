@@ -1,0 +1,4 @@
+core20
+core24
+fx
+snapd
