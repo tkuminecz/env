@@ -31,7 +31,7 @@ cd <workdir> && pi -p --no-session -ne --thinking low \
 ```
 
 - `-p` prints the final answer to stdout and exits. `--mode json` streams full structured events instead.
-- `-ne` skips extension discovery **including MCP servers** — without it every run boots the Notion MCP proxy (~15s + log noise). But `-ne` also strips locally installed safety extensions: if `~/.pi/agent/extensions/permission-gate.ts` exists (it does on Tim's Mac — blocks rm -rf/sudo/chmod-777 outright in headless runs), re-add it explicitly: `-ne -e ~/.pi/agent/extensions/permission-gate.ts`.
+- `-ne` skips extension discovery **including MCP servers** — without it every run boots the Notion MCP proxy (~15s + log noise). But `-ne` also strips installed packages, including the permission-gate extension from Tim's `pi-kit` package (blocks rm -rf/sudo/chmod-777 outright in headless runs — verified). Re-add it explicitly: `-ne -e ~/.pi/agent/git/github.com/tkuminecz/pi-kit/extensions/permission-gate.ts`. Shared pi customizations live in that package (`github.com/tkuminecz/pi-kit`, private) — add new extensions there and `pi update --extensions`, never as loose files in `~/.pi/agent/extensions/`.
 - **Always set `--thinking low` or `medium`.** Tim's pi default is `high`, which stalled 4+ min on a trivial GLM task; `low` finished the same task in seconds.
 - Run via Bash `run_in_background` for anything nontrivial; launch several in parallel for fan-out.
 - pi auto-loads AGENTS.md / CLAUDE.md from cwd — run from the repo root so the agent gets project context (`-nc` disables).
