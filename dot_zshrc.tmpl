@@ -286,3 +286,10 @@ ulimit -n 65536
 # claude alias
 alias claude="claude --allow-dangerously-skip-permissions --permission-mode auto"
 
+# grok CLI (xAI) — installed via its own installer into ~/.grok
+if [ -d "$HOME/.grok/bin" ]; then
+  export PATH="$HOME/.grok/bin:$PATH"
+  fpath=(~/.grok/completions/zsh $fpath)
+  autoload -Uz compinit && compinit -C
+fi
+
