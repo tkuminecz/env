@@ -65,4 +65,41 @@ For each test case, you should ALWAYS include a comment explaning what is being 
 
 In general, don't add tests where we're simply constructing an object (esp Pydantic models) and then just asserting that the fields contain what was passed in. Those aren't really valuable.
 
-Never run single tests to validate changes. You can run single tests as a quick check, but must ALWAYS be followed by running the whole suite when finished with changes.
+## Test feedback loop — cheap first, full suite last
+
+Run the cheapest thing that covers what just changed, and escalate a tier only once it's green.
+Waiting on a full suite mid-loop is the main source of dead time, and nothing requires it — the
+hard rule is about **pushing**, not about every edit.
+
+Tiers, cheapest first, scoped to what was actually touched:
+
+1. the specific test file(s) covering the change, plus format/lint on the touched files
+2. typecheck + the touched package's unit tests
+3. the full unit suite for the touched domain
+4. integration tests
+5. the full battery across every touched domain, E2E included
+
+- **Never escalate while a cheaper tier is red.** The cheap failure usually masks the expensive
+  result anyway, so the slow run is wasted.
+- Escalate when a logical unit of work is done, not after every edit.
+- **Tier 5 is a hard gate before every push — and it gates the push, not each commit.** "The
+  failure looks like it came from main" is not an exemption. Batch related commits and run the
+  full battery once per push batch, never once per logical change.
+- **Never foreground-block or sleep-poll on a suite.** Launch tier 3+ suites with Bash
+  `run_in_background` and keep working (or end the turn) — the finish notification arrives on its
+  own. `until pgrep ...; sleep` loops burn a 10-minute Bash timeout per iteration doing nothing.
+  When the only remaining work is the gate itself, prefer reporting back with the gate running in
+  the background over holding the turn open to watch it.
+- **Suite serialization is per docker stack, not per machine.** A worktree with its own
+  `.env.worktree` (isolated stack) only needs to serialize against pytest runs inside that same
+  worktree — scope any `pgrep -f` check to the worktree path. A worktree in shared docker mode
+  (no `.env.worktree`) shares the MAIN checkout's containers and must serialize against it.
+
+**Skip the deferral when the change class makes cheap tiers blind.** Deferring is safe for pure
+logic; it isn't when only the expensive layer can see the bug. Go to integration early for
+migrations and schema changes, Restate wire names and handlers, auth / RLS / tenancy, changes to
+shared conftest or fixtures, dependency bumps, and anything done while resolving a merge conflict.
+A green unit run on those tells you close to nothing.
+
+When a late failure could have been caught by a cheaper tier, add a test at that tier before moving
+on — that's how the loop gets faster over time.
