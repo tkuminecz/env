@@ -17,7 +17,7 @@ All are verified working via `pi --provider <p> --model <m>`. Cost is equal (~ze
 |---|---|---|---|
 | **grok-4.5** | `--provider xai --model grok-4.5` | Default external workhorse. Strongest external model (#4 AA index, #1 agentic tool use; Terminal-Bench 83.3, SWE-bench Pro 64.7). Fast (~80 tok/s), ~2x more token-efficient than peers. Multi-file changes, harder execution tasks, professional-judgment work. 500K ctx. | Tasks needing >500K context |
 | **glm-5.2** | `--provider zai --model glm-5.2` (Tim's pi default) | Repo-scale long context (usable 1M — its headline feature). Iterative run-test-fix loops (measurably better when told to execute and self-verify than one-shot). Self-contained/single-file work, local bug review. Doesn't refuse security-adjacent tasks. Observed (4/4 A on scoped packages): reliably flags false premises in briefs instead of silently applying them — good premise-checker. | Cross-file reasoning — quality wobbles when correctness spans many files (kilo.ai eval); use grok-4.5 or Claude there |
-| **grok-build-0.1** | `--provider xai --model grok-build-0.1` | The mechanical-swarm lane: latency-sensitive small tasks and wide fan-outs of tiny packages — renames, scripted edits, lookups (100+ tok/s). Purpose-trained coding workhorse (SWE-bench Verified 70.8, successor to grok-code-fast). 256K ctx. **Benchmark-faith row — zero logged LOG.md rows yet**; deliberately send it a few real mechanical tasks soon so the retro has observed history. | Anything needing judgment |
+| **grok-build-0.1** | `--provider xai --model grok-build-0.1` | The mechanical-swarm lane: latency-sensitive small tasks and wide fan-outs of tiny packages — renames, scripted edits, lookups (100+ tok/s). Purpose-trained coding workhorse (SWE-bench Verified 70.8, successor to grok-code-fast). 256K ctx. **Benchmark-faith row — still zero LOG.md rows after two retro cycles.** Hard rule until 3 rows exist: the next mechanical task (rename, scripted edit, lint sweep, tiny fan-out package) routes here, not to grok-4.5. | Anything needing judgment |
 | **grok-4.3** | `--provider xai --model grok-4.3` | Fallback 1M-ctx reasoning model if glm-5.2 is rate-limited on a long-context task. | Generally superseded by grok-4.5 |
 
 Escalate back to **Claude subagents** (per CLAUDE.md routing) when the task holds open-ended judgment, needs conversation context, or must integrate with Agent-tool machinery (structured output schemas, worktree isolation, background notifications).
@@ -40,6 +40,10 @@ To make steps delegable in parallel rather than sequentially:
   The briefs are the slow part to write; the runs are free and concurrent. Disjoint file fences
   are enough to share one checkout; add a `wt` worktree per package only when a package needs
   its own branch/battery or ownership can't be made disjoint.
+- **Sequence against in-flight changes on the same surface.** Don't launch a package while a
+  review fix-pass or another builder is still landing changes on files it will read or touch —
+  the base moves under it and the reconciliation eats the savings (one clean build graded B
+  purely from drift). Launch after the surface settles, or put the pending changes in the brief.
 - **Two-pool rate-limit strategy.** Both subs have undocumented rate limits; a big fan-out on one
   sub can stall the whole round. Split large fan-outs across x.ai and z.ai deliberately —
   glm-5.2 (usable 1M ctx) owns the repo-scale sweep packages; grok takes the multi-file build
@@ -151,13 +155,21 @@ For delegations bigger than a one-shot (a feature, a rebuild, parallel packages)
    - *Spec* — numbered, testable requirements. Any file content or code behavior the brief
      quotes or asserts must be **verified against the file at brief-writing time** — one brief
      shipped a quote that wasn't in the target file; the delegate caught it, but only a good
-     one does.
+     one does. **The same bar applies to any facts sheet or CONTRACT.md the brief points at**:
+     the brief-writer owns every error in supplied ground truth (both misses in one otherwise
+     clean docs package traced to the facts sheet, not the model). For a package-sized contract
+     feeding a fan-out, have an independent opus pass review the contract BEFORE launching
+     builders — the one contract gap that reached review was a spec defect no builder could
+     have caught.
    - *Done means* — battery green + specific acceptance checks; require a single clean commit.
-     **When the deliverable is tests, additionally require mutation RED proofs**: for each core
-     behavior, break the code under test, paste the failing suite output, restore byte-identical
-     — and require assertions on exact/structural tokens, never bare substrings. All three
-     test-suite deliverables briefed without this came back with assertions that couldn't fail;
-     the one briefed with it came back clean.
+     **When the deliverables include ANY tests — even inside a fix package — require mutation
+     RED proofs**: for each core behavior, break the code under test, paste the failing suite
+     output, restore byte-identical — with assertions on exact/structural tokens (never bare
+     substrings) sitting at the layer where the risk lives (the seam the change exercises, not
+     a pure helper next to it). Every suite briefed this way came back clean (n=2); every one
+     briefed without it shipped can't-fail or wrong-layer assertions (n=5). Also require
+     **fix what you flag**: an issue the builder notices in its own output gets fixed or
+     explicitly argued in the deviations report, never just mentioned.
    - *Out of scope* + the deviations-report requirement.
 2. **Worktree per package.** Prefer worktrunk when available — always if the repo has a worktrunk config, generally whenever `wt` is installed: `wt switch --create <branch>` (its hooks make the worktree actually runnable — env files, deps), later `wt merge` and `wt remove` (deletes the branch once merged). Fallback: hand-create from the intended base with `git worktree add <dir> -b <branch> <base-sha>` — never a harness's automatic worktree feature with a defaulted base. If the feature branch advances before launch, `git -C <wt> reset --hard <new-sha>` (safe while the package branch has no commits). Never `git stash` in shared checkouts.
 3. **Battery on the merged result, not just the package's own gates.** Merge `--no-ff`, then run the wider suites the touched surfaces feed — path-scoped runs miss cross-cutting breakage.
@@ -182,8 +194,11 @@ benchmarks, and the table above is downstream of it.
 ## Retro: keep the approach improving
 
 Two triggers, whichever comes first — **5 new rows** since the last retro, or **14 days** with
-at least one new row. `LOG.md`'s `retro-state` header line carries both counters; read it when
-loading this skill (you're reading the file for patterns anyway). On demand: `/delegate retro`.
+at least one new row — **gated by a 1-day cooldown**: never auto-fire within 1 day of `last`,
+however many rows pile up (a heavy fan-out day can log 5+ rows in hours; rows just accumulate
+until the cooldown lapses). `LOG.md`'s `retro-state` header line carries both counters; read it
+when loading this skill (you're reading the file for patterns anyway). On demand:
+`/delegate retro` — runs regardless of cooldown.
 
 ### Where the retro runs — never inline
 
