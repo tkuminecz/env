@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# pi-delegate — one-shot delegation to an external subscription model via pi.
+#
+# Exists to remove the two failure modes of hand-composing the pi invocation:
+#   --thinking low  — pi's saved default is `high`, which stalls for minutes
+#   -e <gate>       — `-ne` (needed to skip ~15s of MCP discovery) also strips
+#                     the pi-kit permission-gate extension; this re-adds it
+# The provider is derived from the model name so the two can never drift apart.
+#
+# Playbook, briefs, review pipeline and scorecard: ~/.claude/skills/delegate/
+
+set -euo pipefail
+
+GATE="$HOME/.pi/agent/git/github.com/tkuminecz/pi-kit/extensions/permission-gate.ts"
+
+model="grok-4.5"
+thinking="low"
+workdir="$PWD"
+brief_file=""
+session=""
+json_mode=0
+dry_run=0
+prompt=""
+
+usage() {
+	cat <<'EOF'
+Usage: pi-delegate [options] "<task>"
+       pi-delegate [options] -f <brief-file>
+
+Options:
+  -m, --model <id>      grok-4.5 (default) | glm-5.2 | grok-build-0.1 | grok-4.3
+  -C, --dir <path>      working dir for the delegate (default: cwd). Use the repo
+                        root so pi auto-loads its AGENTS.md / CLAUDE.md.
+  -f, --file <path>     brief file; sends "Read and execute the brief at <abs>"
+  -t, --thinking <lvl>  low (default) | medium | high   [high stalls — avoid]
+  -s, --session <uuid>  reuse/create a pi session for follow-up turns
+      --json            stream structured events (--mode json) instead of text
+  -n, --dry-run         print the pi command without running it
+  -h, --help            show this
+
+Model -> provider is automatic (glm* -> zai, grok* -> xai).
+
+Every brief should state a self-verification step ("run the tests and report
+PASS/FAIL with output") and ask for a deviations list. Always review the diff
+yourself afterward, then append a row to the delegate skill's LOG.md.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+	-m | --model)
+		model="${2:?--model needs a value}"
+		shift 2
+		;;
+	-C | --dir)
+		workdir="${2:?--dir needs a value}"
+		shift 2
+		;;
+	-f | --file)
+		brief_file="${2:?--file needs a value}"
+		shift 2
+		;;
+	-t | --thinking)
+		thinking="${2:?--thinking needs a value}"
+		shift 2
+		;;
+	-s | --session)
+		session="${2:?--session needs a value}"
+		shift 2
+		;;
+	--json)
+		json_mode=1
+		shift
+		;;
+	-n | --dry-run)
+		dry_run=1
+		shift
+		;;
+	-h | --help)
+		usage
+		exit 0
+		;;
+	--)
+		shift
+		break
+		;;
+	-*)
+		echo "pi-delegate: unknown option '$1' (try --help)" >&2
+		exit 2
+		;;
+	*) break ;;
+	esac
+done
+
+case "$model" in
+glm*) provider="zai" ;;
+grok*) provider="xai" ;;
+*)
+	echo "pi-delegate: cannot infer provider for model '$model' (expected glm* or grok*)" >&2
+	exit 2
+	;;
+esac
+
+if [[ -n "$brief_file" ]]; then
+	[[ -f "$brief_file" ]] || {
+		echo "pi-delegate: brief file not found: $brief_file" >&2
+		exit 2
+	}
+	abs_brief="$(cd "$(dirname "$brief_file")" && pwd)/$(basename "$brief_file")"
+	prompt="Read and execute the brief at ${abs_brief}. Follow it exactly."
+elif [[ $# -gt 0 ]]; then
+	prompt="$*"
+else
+	echo "pi-delegate: need a task string or --file <brief> (try --help)" >&2
+	exit 2
+fi
+
+[[ -d "$workdir" ]] || {
+	echo "pi-delegate: no such directory: $workdir" >&2
+	exit 2
+}
+
+args=(-p -ne --thinking "$thinking" --provider "$provider" --model "$model")
+
+if [[ -f "$GATE" ]]; then
+	args+=(-e "$GATE")
+else
+	# Non-fatal: the delegate still runs, just without the dangerous-bash gate.
+	echo "pi-delegate: WARNING permission-gate extension missing at $GATE" >&2
+	echo "pi-delegate:   run 'pi update --extensions' to restore it" >&2
+fi
+
+if [[ -n "$session" ]]; then
+	args+=(--session-id "$session")
+else
+	args+=(--no-session)
+fi
+
+((json_mode)) && args+=(--mode json)
+
+if ((dry_run)); then
+	printf 'cd %q && pi' "$workdir"
+	printf ' %q' "${args[@]}" "$prompt"
+	printf '\n'
+	exit 0
+fi
+
+cd "$workdir"
+exec pi "${args[@]}" "$prompt"

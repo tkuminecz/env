@@ -1,0 +1,218 @@
+#!/usr/bin/env bash
+# grok-delegate — unattended one-shot delegation to grok-4.5 via the official grok CLI.
+# Sibling of pi-delegate; reach for this harness when the run should be sandboxed,
+# deny-ruled, turn-capped, or must emit schema-constrained JSON. pi-delegate stays
+# the road to GLM models and grok-build.
+#
+# Safety posture for unattended runs (the reasoning, since it's a judgment call):
+#   --permission-mode bypassPermissions — headless runs cannot answer prompts;
+#       `auto`/`dontAsk` stall or kill mid-task on the first non-allowlisted call.
+#       Bypass is safe here ONLY because two enforced layers remain underneath:
+#   --sandbox workspace (default) — kernel-enforced (Landlock): writes limited to
+#       the working dir + tmp; reads unrestricted; network allowed for deps/tests.
+#   default --deny rules — sudo / rm -rf / chmod 777 (parity with pi-kit's
+#       permission-gate) plus git push (delegates commit; Claude reviews and pushes).
+#       Deny rules still apply under bypassPermissions.
+#   --max-turns 40 — runaway protection; raise per-run when a battery needs it.
+#
+# Playbook, briefs, review pipeline and scorecard: ~/.claude/skills/delegate/
+
+set -euo pipefail
+
+model="grok-4.5"
+workdir="$PWD"
+brief_file=""
+resume=""
+json_schema=""
+max_turns="40"
+sandbox="workspace"
+worktree=""
+worktree_ref=""
+default_denies=1
+dry_run=0
+prompt=""
+extra_rules=()
+
+DEFAULT_DENIES=(
+	--deny "Bash(sudo*)"
+	--deny "Bash(rm -rf*)"
+	--deny "Bash(chmod 777*)"
+	--deny "Bash(git push*)"
+)
+
+usage() {
+	cat <<'EOF'
+Usage: grok-delegate [options] "<task>"
+       grok-delegate [options] -f <brief-file>
+
+Options:
+  -m, --model <id>        model passthrough (default grok-4.5 — the only model
+                          this sub exposes in the grok CLI)
+  -C, --dir <path>        working dir for the delegate (default: cwd). Use the
+                          repo root so grok discovers AGENTS.md / project config.
+  -f, --file <path>       brief file; passed natively via --prompt-file <abs>
+  -T, --max-turns <n>     agent turn cap (default 40)
+  -s, --resume <id>       resume an existing grok session (fix loops)
+      --sandbox <profile> sandbox profile (default workspace; off|read-only|strict|...)
+      --json <schema>     constrained JSON output via --json-schema (implies json
+                          output format)
+      --allow <rule>      extra permission allow rule (repeatable)
+      --deny <rule>       extra permission deny rule (repeatable)
+      --no-default-denies drop the baked deny rules (sudo, rm -rf, chmod 777,
+                          git push) — say why in the session notes
+      --worktree [<name>] grok-managed worktree — requires an explicit
+                          --worktree-ref (its default base is a footgun, and it
+                          skips wt hooks; prefer `wt switch --create` + -C)
+      --worktree-ref <r>  base ref for --worktree
+  -n, --dry-run           print the grok command without running it
+  -h, --help              show this
+
+Every brief should state a self-verification step ("run the tests and report
+PASS/FAIL with output") and ask for a deviations list. Always review the diff
+yourself afterward, then append a row to the delegate skill's LOG.md.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+	-m | --model)
+		model="${2:?--model needs a value}"
+		shift 2
+		;;
+	-C | --dir)
+		workdir="${2:?--dir needs a value}"
+		shift 2
+		;;
+	-f | --file)
+		brief_file="${2:?--file needs a value}"
+		shift 2
+		;;
+	-T | --max-turns)
+		max_turns="${2:?--max-turns needs a value}"
+		shift 2
+		;;
+	-s | --resume)
+		resume="${2:?--resume needs a value}"
+		shift 2
+		;;
+	--sandbox)
+		sandbox="${2:?--sandbox needs a value}"
+		shift 2
+		;;
+	--json)
+		json_schema="${2:?--json needs a schema}"
+		shift 2
+		;;
+	--allow)
+		extra_rules+=(--allow "${2:?--allow needs a rule}")
+		shift 2
+		;;
+	--deny)
+		extra_rules+=(--deny "${2:?--deny needs a rule}")
+		shift 2
+		;;
+	--no-default-denies)
+		default_denies=0
+		shift
+		;;
+	--worktree)
+		# Optional value: consume the next arg only if it isn't another option.
+		if [[ $# -gt 1 && "$2" != -* ]]; then
+			worktree="$2"
+			shift 2
+		else
+			worktree="__unnamed__"
+			shift
+		fi
+		;;
+	--worktree-ref)
+		worktree_ref="${2:?--worktree-ref needs a value}"
+		shift 2
+		;;
+	-n | --dry-run)
+		dry_run=1
+		shift
+		;;
+	-h | --help)
+		usage
+		exit 0
+		;;
+	--)
+		shift
+		break
+		;;
+	-*)
+		echo "grok-delegate: unknown option '$1' (try --help)" >&2
+		exit 2
+		;;
+	*) break ;;
+	esac
+done
+
+if [[ -n "$worktree" && -z "$worktree_ref" ]]; then
+	echo "grok-delegate: --worktree requires an explicit --worktree-ref (never trust its default base)" >&2
+	exit 2
+fi
+
+if [[ -n "$brief_file" ]]; then
+	[[ -f "$brief_file" ]] || {
+		echo "grok-delegate: brief file not found: $brief_file" >&2
+		exit 2
+	}
+	abs_brief="$(cd "$(dirname "$brief_file")" && pwd)/$(basename "$brief_file")"
+elif [[ $# -gt 0 ]]; then
+	prompt="$*"
+else
+	echo "grok-delegate: need a task string or --file <brief> (try --help)" >&2
+	exit 2
+fi
+
+[[ -d "$workdir" ]] || {
+	echo "grok-delegate: no such directory: $workdir" >&2
+	exit 2
+}
+
+args=(
+	--model "$model"
+	--permission-mode bypassPermissions
+	--sandbox "$sandbox"
+	--max-turns "$max_turns"
+	--output-format plain
+	--no-auto-update
+)
+
+((default_denies)) && args+=("${DEFAULT_DENIES[@]}")
+[[ ${#extra_rules[@]} -gt 0 ]] && args+=("${extra_rules[@]}")
+
+if [[ -n "$json_schema" ]]; then
+	args+=(--json-schema "$json_schema")
+fi
+
+if [[ -n "$resume" ]]; then
+	args+=(--resume "$resume")
+fi
+
+if [[ -n "$worktree" ]]; then
+	if [[ "$worktree" == "__unnamed__" ]]; then
+		args+=(--worktree)
+	else
+		args+=(--worktree "$worktree")
+	fi
+	args+=(--worktree-ref "$worktree_ref")
+fi
+
+if [[ -n "$brief_file" ]]; then
+	args+=(--prompt-file "$abs_brief")
+else
+	args+=(-p "$prompt")
+fi
+
+if ((dry_run)); then
+	printf 'cd %q && grok' "$workdir"
+	printf ' %q' "${args[@]}"
+	printf '\n'
+	exit 0
+fi
+
+cd "$workdir"
+exec grok "${args[@]}"
