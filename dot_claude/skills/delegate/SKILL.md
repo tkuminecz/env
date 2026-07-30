@@ -17,7 +17,7 @@ All are verified working via `pi --provider <p> --model <m>`. Cost is equal (~ze
 |---|---|---|---|
 | **grok-4.5** | `--provider xai --model grok-4.5` | Default external workhorse. Strongest external model (#4 AA index, #1 agentic tool use; Terminal-Bench 83.3, SWE-bench Pro 64.7). Fast (~80 tok/s), ~2x more token-efficient than peers. Multi-file changes, harder execution tasks, professional-judgment work. 500K ctx. | Tasks needing >500K context |
 | **glm-5.2** | `--provider zai --model glm-5.2` (Tim's pi default) | Repo-scale long context (usable 1M — its headline feature). Iterative run-test-fix loops (measurably better when told to execute and self-verify than one-shot). Self-contained/single-file work, local bug review. Doesn't refuse security-adjacent tasks. Observed (4/4 A on scoped packages): reliably flags false premises in briefs instead of silently applying them — good premise-checker. | Cross-file reasoning — quality wobbles when correctness spans many files (kilo.ai eval); use grok-4.5 or Claude there |
-| **grok-build-0.1** | `--provider xai --model grok-build-0.1` | The mechanical-swarm lane: latency-sensitive small tasks and wide fan-outs of tiny packages — renames, scripted edits, lookups (100+ tok/s). Purpose-trained coding workhorse (SWE-bench Verified 70.8, successor to grok-code-fast). 256K ctx. **Benchmark-faith row — still zero LOG.md rows after two retro cycles.** Hard rule until 3 rows exist: the next mechanical task (rename, scripted edit, lint sweep, tiny fan-out package) routes here, not to grok-4.5. | Anything needing judgment |
+| **grok-build-0.1** | `--provider xai --model grok-build-0.1` | The mechanical-swarm lane: latency-sensitive small tasks and wide fan-outs of tiny packages — renames, scripted edits, lookups (100+ tok/s). Purpose-trained coding workhorse (SWE-bench Verified 70.8, successor to grok-code-fast). 256K ctx. Now has rows (C, B, one hung fix-loop): fast and correctly *shaped*, but **its self-verification claims are the least reliable of the three** — it reported "ruff clean" on a ruff-failing file and silently dropped coverage. Route it mechanical work freely; re-run every gate it claims rather than reading the claim. | Anything needing judgment; anything gated by a hard external constraint CI can't see (see *Done means*) |
 | **grok-4.3** | `--provider xai --model grok-4.3` | Fallback 1M-ctx reasoning model if glm-5.2 is rate-limited on a long-context task. | Generally superseded by grok-4.5 |
 
 Escalate back to **Claude subagents** (per CLAUDE.md routing) when the task holds open-ended judgment, needs conversation context, or must integrate with Agent-tool machinery (structured output schemas, worktree isolation, background notifications).
@@ -88,6 +88,27 @@ cd <workdir> && pi -p --no-session -ne --thinking low \
 - `-ne` skips extension discovery **including MCP servers** — without it every run boots the Notion MCP proxy (~15s + log noise). But `-ne` also strips installed packages, including the permission-gate extension from Tim's `pi-kit` package (blocks rm -rf/sudo/chmod-777 outright in headless runs — verified). Re-add it explicitly: `-ne -e ~/.pi/agent/git/github.com/tkuminecz/pi-kit/extensions/permission-gate.ts`. Shared pi customizations live in that package (`github.com/tkuminecz/pi-kit`, private) — add new extensions there and `pi update --extensions`, never as loose files in `~/.pi/agent/extensions/`.
 - **Always set `--thinking low` or `medium`.** Tim's pi default is `high`, which stalled 4+ min on a trivial GLM task; `low` finished the same task in seconds.
 - Run via Bash `run_in_background` for anything nontrivial; launch several in parallel for fan-out.
+- **Hangs are the single largest cost in the log — arm the watchdog, don't wait for a notification.**
+  Four runs have hung with zero work landed (~20h of dead wall-clock): three session-resumes and
+  one *fresh* one-shot, so no invocation shape is exempt. The harness reports a hung delegate as
+  "running" and the completion notification never arrives.
+
+  **Detect it by CPU, never by elapsed time.** Healthy packages legitimately run 7–45min, so
+  "it's been a while" carries no information — and in `-p` mode pi prints only the final answer,
+  so an empty output file at minute 5 is equally uninformative. What separates them is work:
+  every hang observed sat in `Sl` (blocked on I/O) burning zero CPU, while a live delegate always
+  burns CPU somewhere in its process tree. `pi-delegate` therefore:
+  - runs the delegate in **its own process group** and samples cumulative CPU across the whole
+    group every 20s — so a delegate legitimately blocked waiting on its own `pytest` child still
+    counts as alive (verified: parent asleep + busy child → never flagged);
+  - **kills the group after 3 minutes of zero tree-CPU** (`-W/--stall <mins>`, `0` disables) and
+    exits `125` with a `HUNG` explanation;
+  - keeps a 60min total-runtime backstop (`-T/--timeout`, exit `124`) for slow-but-alive runaways;
+  - writes every sample to a **heartbeat file**, path echoed to stderr at launch.
+
+  So the answer to "is it alive?" is always one second away — `tail -3 <heartbeat>`: `dcpu>0` and
+  `idle=0/N` means working, `idle` climbing means dying. **Check it at ~5 minutes and whenever you
+  wonder.** Don't wait on the completion notification, and don't reason about elapsed time.
 - pi auto-loads AGENTS.md / CLAUDE.md from cwd — run from the repo root so the agent gets project context (`-nc` disables).
 - Follow-up turns: use `--session-id <uuid-you-generate>` instead of `--no-session`; it creates the session if missing and reuses it on later calls (sessions under `~/.pi/agent/sessions/`).
 
@@ -96,7 +117,7 @@ cd <workdir> && pi -p --no-session -ne --thinking low \
 **Harness split** (head-to-head quality was a near tie, so route by harness capability, not model quality):
 
 - **grok CLI = preferred for unattended grok-4.5 package builds.** Its harness advantages are exactly what unattended runs want: kernel-enforced `--sandbox`, `--deny` rules, a `--max-turns` runaway cap, and `--json-schema`-constrained completion reports. The sub exposes ONLY `grok-4.5` in this CLI.
-- **pi = everything else**: any GLM model, grok-build-0.1, quick one-shots, and fix loops on existing pi sessions — plus one interface across both subs.
+- **pi = everything else**: any GLM model, grok-build-0.1, quick one-shots, and fix loops (as fresh one-shots — pi's session-resume is the hang-prone path) — plus one interface across both subs.
 
 `~/bin/grok-delegate` (chezmoi source `bin/executable_grok-delegate`) is the pi-delegate sibling that bakes in the unattended posture so it can't be forgotten: `--permission-mode bypassPermissions` (headless runs can't answer prompts) **plus** the two enforced layers that make that safe — `--sandbox workspace` (kernel-limits writes to the working dir + tmp) and default deny rules (sudo, `rm -rf`, `chmod 777` for pi-kit gate parity, and `git push` — delegates commit, Claude reviews and pushes). Also `--max-turns 40`, `--output-format plain`, `--no-auto-update`.
 
@@ -151,6 +172,18 @@ For delegations bigger than a one-shot (a feature, a rebuild, parallel packages)
 1. **Brief.** Write a self-contained brief file (builder has no conversation context) to the scratchpad, and point the pi invocation at it (`pi -p ... "Read and execute the brief at <abs path>"`). Sections, all load-bearing:
    - *Goal* — one paragraph, plain english.
    - *Scope* — explicit files/dirs this package owns. For parallel packages, add a fence: "do NOT touch X — owned by another package this round." This is the disjointness contract.
+   - *Git hygiene* (**mandatory in every shared-checkout brief**) — verbatim: "Do NOT
+     use `git stash`, `git checkout -- <file>`, or `git reset` at any point. Other
+     packages have uncommitted work in this checkout and all three silently revert it.
+     Stage only your own files by path and commit those. To restore a file after a
+     mutation proof, keep a byte copy (`cp f /tmp/f.bak` … `cp /tmp/f.bak f`) and
+     confirm with `git diff --exit-code f`." Delegates reach for stash unprompted to
+     isolate their commit — file fences do not stop them, because stashing is not
+     "touching" another package's file. Naming the mechanism is what stops it.
+     Corollary the brief-writer must know: `git diff --exit-code` coming back clean
+     proves a mutation was reverted **only** if that file had no uncommitted work of
+     its own; otherwise it silently means that work is gone, and the delegate will
+     report it as proof of a clean restore.
    - *Read first* — repo docs (AGENTS.md/CLAUDE.md auto-load if run from repo root) plus the exact files touched and any shared-context file (cross-package contracts go in one shared scratchpad file referenced by absolute path from every brief).
    - *Spec* — numbered, testable requirements. Any file content or code behavior the brief
      quotes or asserts must be **verified against the file at brief-writing time** — one brief
@@ -166,15 +199,27 @@ For delegations bigger than a one-shot (a feature, a rebuild, parallel packages)
      RED proofs**: for each core behavior, break the code under test, paste the failing suite
      output, restore byte-identical — with assertions on exact/structural tokens (never bare
      substrings) sitting at the layer where the risk lives (the seam the change exercises, not
-     a pure helper next to it). Every suite briefed this way came back clean (n=2); every one
-     briefed without it shipped can't-fail or wrong-layer assertions (n=5). Also require
+     a pure helper next to it). Every suite briefed this way came back clean (7/7 packages);
+     every one briefed without it shipped can't-fail or wrong-layer assertions (5/5). Also require
      **fix what you flag**: an issue the builder notices in its own output gets fixed or
      explicitly argued in the deviations report, never just mentioned.
+     **Demand evidence, not claims, for every gate**: paste the actual command and its output for
+     each of lint / typecheck / tests, plus `git log --oneline -1` and `git status --porcelain`
+     proving the single clean commit exists and nothing was left uncommitted. Three rows shipped
+     a false or absent gate claim ("ruff clean" on a ruff-failing file; coverage silently dropped;
+     a package that never committed at all) — a summary sentence is not evidence, and re-running
+     the claimed gates yourself costs seconds.
+   - *Hard external constraints* — when correctness depends on a limit that lint/typecheck/CI
+     cannot see, name the limit in the brief and require a real-stack proof. Live example: Alembic
+     revision ids must fit `alembic_version VARCHAR(32)`; both ids in one package overran it and
+     `upgrade head` hard-failed on real Postgres while every CI gate stayed green. Same shape for
+     DB column widths, Restate wire-name limits, and identifier caps generally — require the
+     delegate to run the thing (`alembic upgrade head` then `downgrade`) and paste the output.
    - *Out of scope* + the deviations-report requirement.
 2. **Worktree per package.** Prefer worktrunk when available — always if the repo has a worktrunk config, generally whenever `wt` is installed: `wt switch --create <branch>` (its hooks make the worktree actually runnable — env files, deps), later `wt merge` and `wt remove` (deletes the branch once merged). Fallback: hand-create from the intended base with `git worktree add <dir> -b <branch> <base-sha>` — never a harness's automatic worktree feature with a defaulted base. If the feature branch advances before launch, `git -C <wt> reset --hard <new-sha>` (safe while the package branch has no commits). Never `git stash` in shared checkouts.
 3. **Battery on the merged result, not just the package's own gates.** Merge `--no-ff`, then run the wider suites the touched surfaces feed — path-scoped runs miss cross-cutting breakage.
 4. **Independent review — always.** Capture the diff (`git show <sha> > <scratchpad>/<slug>-diff.txt`) and launch a fresh-context **opus** review subagent (per CLAUDE.md routing) with: the diff path, changed-file list, domain rules, and focus hints *including your own suspicions and anything the builder's self-review dismissed*. Builder self-review raises the floor; it never substitutes for this.
-5. **Fix pass, push, cleanup.** Confirmed findings go **back to the builder, not to your own editor** — pi: launch with `--session-id <uuid>` so the session exists to resume; grok: `grok-delegate -s <session-id>`. The builder holds the package context; hand-fixing burns Claude time re-deriving it and silently takes Claude out of the reviewer seat. Fix by hand only when the fix is smaller than the brief for it. Re-run the battery, push, then remove the worktree.
+5. **Fix pass, push, cleanup.** Confirmed findings go **back to the builder, not to your own editor** — the builder holds the package context; hand-fixing burns Claude time re-deriving it and silently takes Claude out of the reviewer seat. Fix by hand only when the fix is smaller than the brief for it. **Prefer a fresh one-shot carrying the fix list over resuming the session** (pi session-resume hung 3 of 4 attempts; both fresh fix one-shots finished in ~20m) — a fix list is self-contained enough that the lost context rarely matters. grok CLI resume (`grok-delegate -s <session-id>`) has not hung. Re-run the battery, push, then remove the worktree.
 6. If the target branch moved while the builder ran, expect conflicts in shared files — resolve keeping both intents, never discard either side blind.
 
 ## Scorecard: log every delegation

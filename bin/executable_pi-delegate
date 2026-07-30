@@ -1,11 +1,23 @@
 #!/usr/bin/env bash
 # pi-delegate — one-shot delegation to an external subscription model via pi.
 #
-# Exists to remove the two failure modes of hand-composing the pi invocation:
+# Exists to remove the three failure modes of hand-composing the pi invocation:
 #   --thinking low  — pi's saved default is `high`, which stalls for minutes
 #   -e <gate>       — `-ne` (needed to skip ~15s of MCP discovery) also strips
 #                     the pi-kit permission-gate extension; this re-adds it
+#   hangs           — pi can hang indefinitely with zero work landed (observed on
+#                     both session-resume and fresh one-shots; the calling harness
+#                     still reports it "running"). Four such runs burned ~25h.
 # The provider is derived from the model name so the two can never drift apart.
+#
+# Hang detection is CPU-based, not duration-based. Every hung run observed sat in
+# `Sl` — blocked on I/O, burning no CPU — while healthy runs legitimately take
+# 7-45min, so elapsed time cannot distinguish them but CPU can. The run gets its
+# own process group; the watchdog samples cumulative CPU across the WHOLE group
+# (so a delegate waiting on its own pytest child still counts as alive) and kills
+# the group once the entire tree has burned zero CPU for --stall minutes. Samples
+# land in a heartbeat file so the caller can confirm liveness at any moment
+# instead of waiting to find out.
 #
 # Playbook, briefs, review pipeline and scorecard: ~/.claude/skills/delegate/
 
@@ -21,6 +33,10 @@ session=""
 json_mode=0
 dry_run=0
 prompt=""
+timeout_mins=60
+stall_mins=3
+sample_secs=20
+heartbeat=""
 
 usage() {
 	cat <<'EOF'
@@ -34,9 +50,21 @@ Options:
   -f, --file <path>     brief file; sends "Read and execute the brief at <abs>"
   -t, --thinking <lvl>  low (default) | medium | high   [high stalls — avoid]
   -s, --session <uuid>  reuse/create a pi session for follow-up turns
+                        [prefer a fresh one-shot for fix loops — resume hangs]
+  -W, --stall <mins>    kill the run once its whole process tree has burned ZERO
+                        cpu for this long, default 3; 0 disables. Exits 125.
+                        This is the real hang detector — hung runs block on I/O
+                        forever, healthy ones always burn cpu somewhere.
+  -T, --timeout <mins>  backstop cap on total runtime, default 60; 0 disables.
+                        Catches slow-but-alive runaways. Exits 124.
+      --heartbeat <p>   where to write cpu/liveness samples
+                        (default $TMPDIR/pi-delegate-<pid>.heartbeat)
       --json            stream structured events (--mode json) instead of text
   -n, --dry-run         print the pi command without running it
   -h, --help            show this
+
+Check the heartbeat file whenever you want — `tail -3` tells you in one second
+whether a run is alive, so there is never a reason to sit and wonder.
 
 Model -> provider is automatic (glm* -> zai, grok* -> xai).
 
@@ -66,6 +94,18 @@ while [[ $# -gt 0 ]]; do
 		;;
 	-s | --session)
 		session="${2:?--session needs a value}"
+		shift 2
+		;;
+	-T | --timeout)
+		timeout_mins="${2:?--timeout needs a value}"
+		shift 2
+		;;
+	-W | --stall)
+		stall_mins="${2:?--stall needs a value}"
+		shift 2
+		;;
+	--heartbeat)
+		heartbeat="${2:?--heartbeat needs a value}"
 		shift 2
 		;;
 	--json)
@@ -138,6 +178,15 @@ fi
 
 ((json_mode)) && args+=(--mode json)
 
+[[ "$timeout_mins" =~ ^[0-9]+$ ]] || {
+	echo "pi-delegate: --timeout takes whole minutes (0 disables), got '$timeout_mins'" >&2
+	exit 2
+}
+[[ "$stall_mins" =~ ^[0-9]+$ ]] || {
+	echo "pi-delegate: --stall takes whole minutes (0 disables), got '$stall_mins'" >&2
+	exit 2
+}
+
 if ((dry_run)); then
 	printf 'cd %q && pi' "$workdir"
 	printf ' %q' "${args[@]}" "$prompt"
@@ -146,4 +195,109 @@ if ((dry_run)); then
 fi
 
 cd "$workdir"
-exec pi "${args[@]}" "$prompt"
+
+# No watchdog wanted: hand the process straight over.
+if ((timeout_mins == 0 && stall_mins == 0)); then
+	exec pi "${args[@]}" "$prompt" </dev/null
+fi
+
+: "${heartbeat:=${TMPDIR:-/tmp}/pi-delegate-$$.heartbeat}"
+
+# Cumulative cpu seconds and process count for a whole process group.
+tree_stat() {
+	ps -eo pgid=,cputimes= 2>/dev/null |
+		awk -v g="$1" '$1 == g { cpu += $2; n++ } END { print cpu + 0, n + 0 }'
+}
+
+# Own process group, so one kill reaches the delegate and every child it spawned.
+# stdin from /dev/null: a background process group reading the tty gets SIGTTIN.
+set -m
+pi "${args[@]}" "$prompt" </dev/null &
+pid=$!
+set +m
+pgid=$pid
+
+stall_limit=0
+((stall_mins > 0)) && stall_limit=$(((stall_mins * 60 + sample_secs - 1) / sample_secs))
+
+{
+	echo "# pi-delegate $model @ $provider  pid=$pid pgid=$pgid"
+	echo "# workdir=$workdir"
+	echo "# sampling every ${sample_secs}s; stall kill after ${stall_mins}m zero-cpu; cap ${timeout_mins}m"
+} >"$heartbeat"
+
+echo "pi-delegate: heartbeat -> $heartbeat  (tail it any time to confirm liveness)" >&2
+
+start=$SECONDS
+last_cpu=-1
+idle_streak=0
+verdict=""
+tick=0
+
+while kill -0 "$pid" 2>/dev/null; do
+	sleep 1
+	((++tick % sample_secs == 0)) || continue
+	kill -0 "$pid" 2>/dev/null || break
+
+	read -r cpu procs < <(tree_stat "$pgid")
+	elapsed=$((SECONDS - start))
+	if ((last_cpu < 0)); then dcpu=$cpu; else dcpu=$((cpu - last_cpu)); fi
+	last_cpu=$cpu
+
+	if ((dcpu > 0)); then idle_streak=0; else ((++idle_streak)); fi
+
+	printf '%s elapsed=%ds tree_cpu=%ds dcpu=%ds procs=%d idle=%d/%d\n' \
+		"$(date -Is)" "$elapsed" "$cpu" "$dcpu" "$procs" "$idle_streak" "$stall_limit" \
+		>>"$heartbeat"
+
+	if ((stall_limit > 0 && idle_streak >= stall_limit)); then
+		verdict="stall"
+		break
+	fi
+	if ((timeout_mins > 0 && elapsed >= timeout_mins * 60)); then
+		verdict="cap"
+		break
+	fi
+done
+
+if [[ -n "$verdict" ]]; then
+	kill -TERM -"$pgid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+	for _ in $(seq 15); do
+		kill -0 "$pid" 2>/dev/null || break
+		sleep 1
+	done
+	kill -KILL -"$pgid" 2>/dev/null || true
+	set +e
+	wait "$pid" 2>/dev/null
+	set -e
+
+	if [[ "$verdict" == "stall" ]]; then
+		echo "KILLED: stalled — zero cpu across the whole process tree for ${stall_mins}m" >>"$heartbeat"
+		echo "pi-delegate: HUNG and killed — the entire process tree burned zero cpu for ${stall_mins}m." >&2
+		echo "pi-delegate:   Assume ZERO work landed; observed hangs never recovered on their own." >&2
+		echo "pi-delegate:   Check the repo for partial edits, then relaunch as a FRESH one-shot" >&2
+		echo "pi-delegate:   (not a session resume) or do the work in-house." >&2
+		tail -3 "$heartbeat" >&2
+		exit 125
+	fi
+
+	echo "KILLED: hit the ${timeout_mins}m cap while still burning cpu" >>"$heartbeat"
+	echo "pi-delegate: hit the ${timeout_mins}m cap and was killed. It was still burning cpu," >&2
+	echo "pi-delegate:   so this is a slow/runaway run, not the usual hang — check for partial" >&2
+	echo "pi-delegate:   work before relaunching, and raise -T if the package is genuinely big." >&2
+	tail -3 "$heartbeat" >&2
+	exit 124
+fi
+
+set +e
+wait "$pid"
+status=$?
+set -e
+
+# last_cpu is the final sample; the tree is already gone by now, so re-reading it
+# would always report 0. -1 means the run finished before the first sample.
+if ((last_cpu < 0)); then last_seen="unsampled"; else last_seen="${last_cpu}s"; fi
+printf 'EXIT %d after %ds (last sampled tree_cpu=%s)\n' \
+	"$status" "$((SECONDS - start))" "$last_seen" >>"$heartbeat"
+
+exit "$status"

@@ -86,10 +86,15 @@ Two wrappers on PATH, both dry-runnable with `-n`, never hand-composed flags: **
 for unattended grok-4.5 package builds via the grok CLI (bakes in kernel sandbox, deny rules,
 `--max-turns`, schema-constrained reports; the sub exposes only grok-4.5 there), and
 **`pi-delegate`** for everything else — GLM models, **grok-build-0.1** (the mechanical-swarm lane:
-fast small edits and wide tiny fan-outs; still unproven in the log — give it reps), quick
-one-shots, and session fix loops. It bakes in the mandatory `--thinking low`, re-adds the
-permission-gate extension that `-ne` strips, and derives the provider from the model name. Load
-the `delegate` skill for the full playbook (brief template, decompose-for-delegation, worktree
-pipeline, review step, scorecard). Non-negotiables: require self-verification in every brief,
-independently review the diff myself before accepting, and append a row to the skill's `LOG.md`
-afterward.
+fast small edits and wide tiny fan-outs; correctly shaped but the weakest self-verification of the
+three — re-run every gate it claims), quick one-shots, and fix loops. It bakes in the mandatory
+`--thinking low`, re-adds the permission-gate extension that `-ne` strips, derives the provider
+from the model name, and **watchdogs the run by CPU**: the delegate gets its own process group,
+tree-CPU is sampled every 20s to a heartbeat file, and a tree burning zero CPU for 3min is killed
+as hung (exit 125; 60min backstop cap = 124). `tail -3 <heartbeat>` answers "is it alive?" in a
+second — check it early rather than waiting on a notification that never comes for a hang. Load
+the `delegate` skill for
+the full playbook (brief template, decompose-for-delegation, worktree pipeline, review step,
+scorecard). Non-negotiables: require self-verification **with pasted command output** in every
+brief, independently review the diff myself before accepting, and append a row to the skill's
+`LOG.md` afterward.
