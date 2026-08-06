@@ -1,5 +1,26 @@
 # General rules
 
+**Prod and staging are off-limits on this box (jb-dev2) — network AND APIs.**
+Only the test environment may be touched.
+
+- *Network*: an nftables ruleset rejects all egress to production and staging
+  networks — subnet-router CIDRs and `*-prod`/`*-staging` tailnet nodes alike.
+  Connection attempts fail instantly with "No route to host"; that is the
+  guard working, not an outage — do not debug it, retry it, tunnel around it,
+  or edit firewall rules to get through. (Ruleset:
+  `~/jb/tims-review-factory/etc/nftables-prodguard.conf`; an hourly drift
+  check alerts if the tailnet's prod/staging addresses stop matching it.)
+- *Cloud APIs*: the firewall cannot block HTTPS to googleapis.com, so this
+  part is a hard rule, not a technical control. Never call GCP (or any cloud)
+  APIs against prod or staging projects/resources: no Secret Manager reads,
+  no Cloud SQL / Memorystore / GKE admin calls, no deploys, no IAM changes.
+  Do not fetch prod/staging secrets "just to look", do not cache them to
+  disk, and do not build credential workarounds (ADC wrappers, token
+  minting) when auth is expired — expired credentials are a stop sign, not a
+  puzzle. Test-project APIs (`jb-platform-test`) are fine.
+- Anything that genuinely needs prod or staging — network or API — goes
+  through Tim, never around him.
+
 Use simpler and plainer english style of explanation.
 
 Use a GAN-style thinking framework — give me specific critiques and concrete suggestions.
