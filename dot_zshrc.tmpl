@@ -293,3 +293,14 @@ if [ -d "$HOME/.grok/bin" ]; then
   autoload -Uz compinit && compinit -C
 fi
 
+# pi model aliases (compose with -p --no-session -ne --thinking low for headless delegation)
+# local models: exclude Notion MCP tools — their schemas break llama.cpp's tool-grammar compiler
+export PI_LOCAL_XT="mcp__notion__notion_convert_page_to_skill,mcp__notion__notion_create_attachment,mcp__notion__notion_create_comment,mcp__notion__notion_create_database,mcp__notion__notion_create_file_upload,mcp__notion__notion_create_folder,mcp__notion__notion_create_pages,mcp__notion__notion_create_view,mcp__notion__notion_download_attachment,mcp__notion__notion_duplicate_page,mcp__notion__notion_fetch,mcp__notion__notion_get_async_task,mcp__notion__notion_get_comments,mcp__notion__notion_get_teams,mcp__notion__notion_get_users,mcp__notion__notion_list_favorite_pages,mcp__notion__notion_list_private_pages,mcp__notion__notion_list_recent_pages,mcp__notion__notion_list_shared_pages,mcp__notion__notion_move_pages,mcp__notion__notion_query_data_sources,mcp__notion__notion_query_database_view,mcp__notion__notion_query_meeting_notes,mcp__notion__notion_search,mcp__notion__notion_search_agents,mcp__notion__notion_update_data_source,mcp__notion__notion_update_page,mcp__notion__notion_update_view"
+alias pi-glm='pi --provider zai --model glm-5.2'
+alias pi-grok='pi --provider xai --model grok-4.5'
+alias pi-grok-build='pi --provider xai --model grok-build-0.1'
+alias pi-deepseek='pi --provider openrouter --model deepseek/deepseek-v4-flash-0731'
+alias pi-local-qwen='pi -xt "$PI_LOCAL_XT" --provider local --model Qwen3-Coder-Next-UD-Q3_K_XL'
+alias llama-router='llama-server --models-dir ~/models --models-preset ~/models/router-presets.ini --no-models-autoload --jinja --host 127.0.0.1 --port 8080 -ngl 999 -c 65536'
+alias pi-local-qwen36='pi -xt "$PI_LOCAL_XT" --provider local --model Qwen3.6-35B-A3B-UD-Q4_K_XL'
+alias pi-local-gptoss='pi -xt "$PI_LOCAL_XT" --provider local --model gpt-oss-20b-MXFP4'
