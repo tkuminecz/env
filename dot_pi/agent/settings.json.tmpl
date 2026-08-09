@@ -1,0 +1,39 @@
+{
+  "theme": "dark",
+
+  {{- /*
+    Note: "lastChangelogVersion" is intentionally NOT here. pi stamps
+    it into the file after updates; chezmoi strips it on the next apply,
+    so the template only defines keys you own. Consequence: the changelog
+    stamp never survives, so pi re-shows the changelog on every update.
+    collapseChangelog (below) keeps that to a condensed summary.
+  */}}
+
+  {{- /* Per-machine provider/model. Edit the hostnames to match your machines. */}}
+  {{- if eq .chezmoi.hostname "workbox" }}
+  "defaultProvider": "openrouter",
+  "defaultModel": "deepseek/deepseek-v4-flash-0731",
+  {{- else }}
+  "defaultProvider": "anthropic",
+  "defaultModel": "claude-sonnet-4-5",
+  {{- end }}
+
+  "defaultThinkingLevel": "high",
+
+  {{- /* Packages are shared everywhere; pi auto-installs them per machine. */}}
+  "packages": [
+    "npm:pi-blackhole",
+    "npm:pi-web-access",
+    "npm:pi-execution-time",
+    "npm:@vanillagreen/pi-tool-renderer",
+    "npm:@baretread/pi-forge",
+    "npm:pi-cc-header",
+    "npm:@99percentpeople/pi-thinking-fold"
+  ],
+
+  "quietStartup": true,
+  "clearOnStart": true,
+  "collapseChangelog": true,
+  "steeringMode": "one-at-a-time",
+  "followUpMode": "one-at-a-time"
+}

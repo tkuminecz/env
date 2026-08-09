@@ -20,3 +20,14 @@ machines
 .config/karabiner
 Library
 {{ end }}
+
+# pi — credentials/caches/install artifacts never sync.
+# pi reinstalls npm packages & extensions from settings.json's packages list.
+.pi/agent/auth.json
+.pi/agent/models-store.json
+.pi/agent/sessions
+.pi/agent/trust.json
+.pi/agent/npm
+.pi/agent/bin
+.pi/agent/pi-blackhole
+.pi/agent/extensions/herdr-agent-state.ts

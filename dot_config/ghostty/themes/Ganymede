@@ -1,0 +1,23 @@
+# Ganymede — ported from iTerm2 custom color preset
+palette = 0=#093750
+palette = 1=#f25a55
+palette = 2=#f1d677
+palette = 3=#ffba00
+palette = 4=#00b7ed
+palette = 5=#f5837f
+palette = 6=#00b7ed
+palette = 7=#dcebf5
+palette = 8=#a2d9f5
+palette = 9=#f25a55
+palette = 10=#f1d677
+palette = 11=#ffba00
+palette = 12=#00b7ed
+palette = 13=#f5837f
+palette = 14=#00b7ed
+palette = 15=#e6eef3
+background = #093750
+foreground = #dcebf5
+cursor-color = #00b7ed
+cursor-text = #093750
+selection-background = #e6eef3
+selection-foreground = #a2d9f5

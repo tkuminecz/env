@@ -1,0 +1,38 @@
+# Ghostty config — mirrors tims-macbook-pro (~/Library/Application Support/com.mitchellh.ghostty/config)
+
+# Custom theme file: ~/.config/ghostty/themes/Ganymede
+theme = Ganymede
+
+# --- CRT shader (keep on!) ------------------------------------------------
+# Cursor glow first, then the main in-game CRT pass (order matters).
+custom-shader = ~/.config/ghostty/shaders/in-game-crt-cursor.glsl
+custom-shader = ~/.config/ghostty/shaders/in-game-crt.glsl
+
+# Matches iTerm / the Pro: Roboto Mono Nerd Font (mono), 14pt, thickened
+font-family = RobotoMono Nerd Font Mono
+font-size = 14
+font-thicken = true
+font-thicken-strength = 50
+
+# Same as iTerm / the Pro: subtle translucency + strong blur
+background-opacity = 0.99
+background-blur = 39
+
+# auto-install terminfo on ssh hosts; fall back to xterm-256color when not possible
+shell-integration-features = ssh-env,ssh-terminfo
+
+# no blinking cursor, same as iTerm profiles
+cursor-style-blink = false
+
+# gentle dimming of unfocused splits (iTerm dim amount ~0.15)
+#unfocused-split-opacity = 0.85
+
+# quake-style dropdown terminal on opt+` (same hotkey as iTerm's hotkey window)
+keybind = global:opt+grave_accent=toggle_quick_terminal
+quick-terminal-position = center
+
+# --- extra fold/unfold (not on the Pro, kept for convenience) --------------
+keybind = ctrl+shift+enter=new_split:right
+keybind = ctrl+shift+backslash=new_split:right
+keybind = ctrl+shift+minus=new_split:down
+keybind = ctrl+shift+z=toggle_split_zoom
