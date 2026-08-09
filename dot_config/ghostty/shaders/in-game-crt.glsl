@@ -37,8 +37,8 @@
 // 0.4 (default) is the strong CRT corner-vignette look.
 #define VIGNETTE_SPREAD 0.10
 // How bright the vignette is
-// Center multiplier = BRIGHTNESS * 0.0625^SPREAD. With spread 0.10, 3.5 -> ~2.65x.
-#define VIGNETTE_BRIGHTNESS 3.5
+// Center multiplier = BRIGHTNESS * 0.0625^SPREAD. With spread 0.10, 4.2 -> ~3.18x.
+#define VIGNETTE_BRIGHTNESS 4.2
 
 // Tint all colors
 // [0, 1]^3
@@ -48,7 +48,7 @@
 // NOTE: Technically these are not scan lines, but rather the lack of them
 // [0, 1]
 // VINTAGE PRESET: strength 0.6, variance 0.6, period 3
-#define SCAN_LINES_STRENGTH 0.60
+#define SCAN_LINES_STRENGTH 0.4
 // How bright the spaces between the lines are
 // [0, 1]
 #define SCAN_LINES_VARIANCE 0.60
@@ -58,7 +58,7 @@
 
 // How visible the aperture grille is
 // x \in R : x >= 0
-#define APERTURE_GRILLE_STRENGTH 0.5
+#define APERTURE_GRILLE_STRENGTH 0.0
 // Pixels per aperture grille
 // x \in R : x > 0
 #define APERTURE_GRILLE_PERIOD 2.0
@@ -66,17 +66,17 @@
 // How much the screen flickers
 // x \in R : x >= 0
 // VINTAGE PRESET: strength 0.015
-#define FLICKER_STRENGTH 0.015
+#define FLICKER_STRENGTH 0.01
 // How fast the screen flickers
 // x \in R : x > 0
 #define FLICKER_FREQUENCY 15.0
 
 // How much noise is added to filled areas
 // [0, 1]
-#define NOISE_CONTENT_STRENGTH 0.15
+#define NOISE_CONTENT_STRENGTH 0.0
 // How much noise is added everywhere
 // [0, 1]
-#define NOISE_UNIFORM_STRENGTH 0.15
+#define NOISE_UNIFORM_STRENGTH 0.0
 
 // How big the bloom is
 // x \in R : x >= 0
@@ -87,7 +87,7 @@
 
 // Backgrond opacity
 // [0, 1]
-#define BACKGROUND_OPACITY 0.8
+#define BACKGROUND_OPACITY 0.88
 
 
 // Disabled values for when the settings are not defined
