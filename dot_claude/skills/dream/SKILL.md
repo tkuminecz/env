@@ -125,8 +125,15 @@ hallucinated findings self-evident.
 
 ### 5. Report to Tim
 
-Write the synthesized report to the scratchpad and present it (herdr pane with `glow -p`
-when HERDR_ENV=1). Structure:
+The deliverable is a **Claude Artifact** — a published page Tim reviews in the browser.
+Load the `artifact-design` skill first, write the report as HTML in the scratchpad, and
+publish with the Artifact tool (favicon `💤`, keep it stable; one artifact per dream
+round — redeploy the same file path for revisions). Design notes: findings as cards
+with category/effort/confidence badges and the quoted code lines in `<pre>` blocks;
+for the top structural findings, a small before/after mermaid diagram
+(`<pre class="mermaid">` renders natively — no CDNs, which the CSP blocks anyway).
+Theme-aware per the Artifact tool's rules. Also drop a plain-markdown copy in the
+scratchpad, and give the artifact URL in the chat reply. Report structure:
 
 - **TLDR** — 2-4 sentences: the area's overall health and the top 2-3 opportunities.
 - **Do now** (≤5 items) vs **Later** — each item: title, location, why, effort,

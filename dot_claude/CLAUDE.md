@@ -56,6 +56,15 @@ output quality — state the goal, the constraints, and what done looks like, th
 That is the opposite of how to brief sonnet or an external pi delegate, where enumerated steps help. Run it
 in the background: single fable turns on hard tasks routinely take many minutes, and that's expected, not a hang.
 
+## Leverage herdr
+
+When running inside herdr (HERDR_ENV=1), use it actively rather than keeping everything in
+one pane: open documents for review in a vertical pane (`glow -p` for markdown), show diffs
+there, and run delegated agents or long-running work in their own panes/tabs. Anything Tim
+needs to read and react to — a plan, a proposal, a diff — reads better in its own pane than
+scrolled through chat. Close panes when their content is dealt with. Load the `herdr` skill
+for the mechanics.
+
 ## External delegation: GLM + Grok via `pi` or herdr
 
 Tim pays flat-rate subs for z.ai (GLM 5.2) and x.ai SuperGrok (Grok 4.5, grok-build-0.1), both wired into the `pi` coding agent. A delegated task costs nothing against Anthropic quota, and a bad one costs a `git diff` and a discard. So **external is the default for verifiable execution work** — not a special-occasion alternative I reach for when asked. Opus/fable routing is unchanged.
@@ -64,6 +73,11 @@ Tim pays flat-rate subs for z.ai (GLM 5.2) and x.ai SuperGrok (Grok 4.5, grok-bu
 starting any of them — an untagged step drifts to the expensive lane by inertia. Decompose plans
 so steps are delegable in parallel (interface-first, packages disjoint by file ownership); the
 `delegate` skill's "Decompose for delegation" section has the mechanics.
+
+**The router applies inside skill flows too.** When a skill (`/github-fix-review-feedback`,
+`/self-review`, etc.) produces a fix list or work items, tag each item grok/glm/claude before
+starting, same as a plan. And for multi-package features, maximum parallel fan-out is the
+default — decompose for width first, not a sequential plan with a couple of delegated steps.
 
 **Delegate by default** — don't deliberate, write the brief and go:
 
@@ -83,11 +97,12 @@ so steps are delegable in parallel (interface-first, packages disjoint by file o
 - final judgment calls: what to ship, what to tell Tim, whether a review finding is real
 
 Two wrappers on PATH, both dry-runnable with `-n`, never hand-composed flags: **`grok-delegate`**
-for unattended grok-4.5 package builds via the grok CLI (bakes in kernel sandbox, deny rules,
-`--max-turns`, schema-constrained reports; the sub exposes only grok-4.5 there), and
-**`pi-delegate`** for everything else — GLM models, **grok-build-0.1** (the mechanical-swarm lane:
-fast small edits and wide tiny fan-outs; correctly shaped but the weakest self-verification of the
-three — re-run every gate it claims), quick one-shots, and fix loops. It bakes in the mandatory
+for unattended grok-4.5 package builds via the grok CLI — **now the primary and best-graded
+lane** (bakes in kernel sandbox with an auto-downgrade where the host denies user namespaces,
+deny rules, `--max-turns 80`, schema-constrained reports; the sub exposes only grok-4.5 there) —
+and **`pi-delegate`** for everything else — GLM models, **grok-build-0.1** (the mechanical-swarm
+lane: keep its packages genuinely tiny; its edits land but its *report phase* is where it dies,
+so re-run every gate it claims and expect to salvage), quick one-shots, and fix loops. It bakes in the mandatory
 `--thinking low`, re-adds the permission-gate extension that `-ne` strips, derives the provider
 from the model name, and **watchdogs the run by CPU**: the delegate gets its own process group,
 tree-CPU is sampled every 20s to a heartbeat file, and a tree burning zero CPU for 3min is killed

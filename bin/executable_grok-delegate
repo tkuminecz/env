@@ -13,7 +13,17 @@
 #   default --deny rules — sudo / rm -rf / chmod 777 (parity with pi-kit's
 #       permission-gate) plus git push (delegates commit; Claude reviews and pushes).
 #       Deny rules still apply under bypassPermissions.
-#   --max-turns 40 — runaway protection; raise per-run when a battery needs it.
+#   --max-turns 80 — runaway protection. Was 40, but a cap is always hit at the
+#       END of a run, so the phase it eats is verification: five packages lost
+#       their mutation-RED proofs to the 40 cap while their edits were complete.
+#       Budget roughly 40 + 8 per demanded proof; raise per-run for wide briefs.
+#
+# Sandbox auto-fallback: grok's sandbox needs unprivileged user namespaces, which
+# some hosts deny (jb-dev: "bwrap: setting up uid map: Permission denied"). grok
+# then exits 0 with a one-line error that reads as SUCCESS in a task notification,
+# so the run silently does nothing. When --sandbox was not passed explicitly we
+# probe the primitive and fall back to `off` with a loud warning rather than
+# handing back a fake success.
 #
 # Playbook, briefs, review pipeline and scorecard: ~/.claude/skills/delegate/
 
@@ -24,8 +34,9 @@ workdir="$PWD"
 brief_file=""
 resume=""
 json_schema=""
-max_turns="40"
+max_turns="80"
 sandbox="workspace"
+sandbox_explicit=0
 worktree=""
 worktree_ref=""
 default_denies=1
@@ -51,9 +62,13 @@ Options:
   -C, --dir <path>        working dir for the delegate (default: cwd). Use the
                           repo root so grok discovers AGENTS.md / project config.
   -f, --file <path>       brief file; passed natively via --prompt-file <abs>
-  -T, --max-turns <n>     agent turn cap (default 40)
+  -T, --max-turns <n>     agent turn cap (default 80). A cap is hit at the END of
+                          a run, so it eats verification: budget ~40 + 8 per
+                          mutation-RED proof the brief demands.
   -s, --resume <id>       resume an existing grok session (fix loops)
-      --sandbox <profile> sandbox profile (default workspace; off|read-only|strict|...)
+      --sandbox <profile> sandbox profile (default workspace, auto-downgraded to
+                          off with a warning where the kernel denies user
+                          namespaces; off|read-only|strict|...)
       --json <schema>     constrained JSON output via --json-schema (implies json
                           output format)
       --allow <rule>      extra permission allow rule (repeatable)
@@ -97,6 +112,7 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--sandbox)
 		sandbox="${2:?--sandbox needs a value}"
+		sandbox_explicit=1
 		shift 2
 		;;
 	--json)
@@ -171,6 +187,19 @@ fi
 	echo "grok-delegate: no such directory: $workdir" >&2
 	exit 2
 }
+
+# Unprivileged user namespaces are what the sandbox is built on; if the kernel
+# denies them, an unattended sandboxed run fails as a fake success (see header).
+if ((!sandbox_explicit)) && [[ "$sandbox" != off ]]; then
+	# Only conclude "denied" when bwrap exists and fails — if it is absent, grok may
+	# be sandboxing by some other means and we must not weaken it on a guess.
+	if command -v bwrap >/dev/null 2>&1 &&
+		! bwrap --dev-bind / / --unshare-user true >/dev/null 2>&1; then
+		echo "grok-delegate: user namespaces denied on this host — falling back to --sandbox off." >&2
+		echo "grok-delegate: the deny rules still apply; keep the fence in the brief." >&2
+		sandbox="off"
+	fi
+fi
 
 args=(
 	--model "$model"

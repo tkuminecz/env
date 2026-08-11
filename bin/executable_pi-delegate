@@ -66,7 +66,7 @@ Options:
 Check the heartbeat file whenever you want — `tail -3` tells you in one second
 whether a run is alive, so there is never a reason to sit and wonder.
 
-Model -> provider is automatic (glm* -> zai, grok* -> xai).
+Model -> provider is automatic (glm* -> zai, grok* -> xai, deepseek/* -> openrouter).
 
 Every brief should state a self-verification step ("run the tests and report
 PASS/FAIL with output") and ask for a deviations list. Always review the diff
@@ -135,8 +135,9 @@ done
 case "$model" in
 glm*) provider="zai" ;;
 grok*) provider="xai" ;;
+deepseek/*) provider="openrouter" ;;
 *)
-	echo "pi-delegate: cannot infer provider for model '$model' (expected glm* or grok*)" >&2
+	echo "pi-delegate: cannot infer provider for model '$model' (expected glm*, grok*, or deepseek/*)" >&2
 	exit 2
 	;;
 esac
