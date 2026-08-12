@@ -1,11 +1,11 @@
 ---
 name: dream
-description: "Codebase dreaming: fan out unmetered external agents (grok, glm, optionally deepseek) over a domain or subdomain to hunt for improvement opportunities — code smells, sloppy code, useless tests, DRY violations, performance wins, simplification. Read-only exploration, duplicated across models for varying perspectives, synthesized into a verified findings report. Use when Tim says /dream, \"dream on <area>\", \"send agents to look for cleanup opportunities in X\", or wants an open-ended quality sweep of part of the codebase with no specific bug in mind."
+description: "Codebase dreaming: fan out external agents (grok, glm, deepseek) over a domain or subdomain to hunt for improvement opportunities — code smells, sloppy code, useless tests, DRY violations, performance wins, simplification. Read-only exploration, duplicated across models for varying perspectives, synthesized into a verified findings report. Use when Tim says /dream, \"dream on <area>\", \"send agents to look for cleanup opportunities in X\", or wants an open-ended quality sweep of part of the codebase with no specific bug in mind."
 ---
 
 # Dreaming: open-ended improvement sweeps via external delegates
 
-Send flat-rate external models (grok-4.5, glm-5.2; deepseek as trial lane) wandering
+Send external models (grok-4.5, glm-5.2, deepseek-v4-flash-0731) wandering
 through a domain of the codebase looking for anything worth improving. Unlike `/delegate`
 (execution of a known spec) or `/code-review` (a diff), dreaming has **no diff and no
 spec** — the deliverable is a triaged, Claude-verified report of opportunities, especially
@@ -24,11 +24,12 @@ watchdog, stagger rules, provider pools) come from there and are not repeated he
   `git status` after the round; any dirt gets discarded and noted in LOG.md.
 - **Findings are claims.** A delegate citing `file:line` may be paraphrasing or
   hallucinating. Nothing reaches Tim's report unverified (step 4).
-- **Duplication is the point.** Sending grok AND glm at the same subarea is cheap and
-  yields different perspectives. Cross-model agreement on a finding is the strongest
-  quality signal this skill has.
-- Marginal cost is ~zero for grok/glm, so err toward more agents, not fewer — bounded
-  only by the stagger rules (2–3 concurrent per provider, `-W 10`).
+- **Duplication is the point.** Sending grok, glm AND deepseek at the same subarea is
+  cheap and yields different perspectives. Cross-model agreement on a finding is the
+  strongest quality signal this skill has.
+- Marginal cost is ~zero for grok/glm (flat-rate subs) and small for deepseek
+  (pay-per-token, but cheap), so err toward more agents, not fewer — bounded only by
+  the stagger rules (2–3 concurrent per provider, `-W 10`).
 
 ## Procedure
 
@@ -100,10 +101,10 @@ hallucinated findings self-evident.
 
 ### 3. Fan out
 
-- Default pairing: **every subarea gets grok-4.5 AND glm-5.2** with the identical brief
-  (separate brief files only because the report path differs).
-- Optionally add **deepseek-v4-flash-0731** on 1–2 subareas as the trial lane (it's
-  pay-per-token — cheap, not free; don't make it a full third column without asking).
+- Default fan-out: **every subarea gets grok-4.5, glm-5.2 AND deepseek-v4-flash-0731**
+  with the identical brief (separate brief files only because the report path differs).
+- deepseek is pay-per-token — cheap, not free. It still runs by default; only drop it
+  when Tim says to, or when a round is so large the token spend is worth raising first.
 - Launch per delegate-skill rules: `pi-delegate -C <repo-root> -m <model> -f <brief>`
   with `run_in_background`, max 2–3 concurrent per provider, `-W 10`, release the next
   brief as slots free. Grok concurrency via grok CLI if pi-grok is stalling that day.
@@ -114,11 +115,12 @@ hallucinated findings self-evident.
 
 1. Collect all report files; note any delegate that died or wrote nothing (re-run or
    drop, don't fabricate).
-2. Merge findings across models per subarea. Tag each: **both-models** / grok-only /
-   glm-only / deepseek-only.
+2. Merge findings across models per subarea. Tag each with which models found it:
+   **all-three** / any two (e.g. grok+glm) / single-model (grok-only, glm-only,
+   deepseek-only).
 3. **Verify before reporting**: for every finding you'd surface, open the cited
    file:line and confirm the quoted code exists and the claim holds. Kill findings that
-   don't check out; downgrade paraphrase-drift ones. Both-models agreement lowers the
+   don't check out; downgrade paraphrase-drift ones. Cross-model agreement lowers the
    verification bar, never removes it.
 4. Rank by (leverage for understandability) × (confidence) ÷ (effort). Simplifications
    that delete code outrank everything at equal confidence.
