@@ -87,6 +87,8 @@ default — decompose for width first, not a sequential plan with a couple of de
 - "make this lint / typecheck / format clean"
 - doc and comment sweeps
 - any fan-out of similar independent chunks
+- final read-only merge-readiness reviews of a big diff → the 4-model panel (grok CLI + glm +
+  deepseek + one opus Agent as reference; `delegate` skill "Read-only review panels")
 
 **Don't delegate**:
 

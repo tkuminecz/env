@@ -42,6 +42,7 @@ worktree_ref=""
 default_denies=1
 dry_run=0
 prompt=""
+report=""
 extra_rules=()
 
 DEFAULT_DENIES=(
@@ -65,6 +66,9 @@ Options:
   -T, --max-turns <n>     agent turn cap (default 80). A cap is hit at the END of
                           a run, so it eats verification: budget ~40 + 8 per
                           mutation-RED proof the brief demands.
+  -o, --report <p>        tee the delegate's stdout (its final report) to this
+                          file (default $TMPDIR/grok-delegate-<pid>.report) so a
+                          piped or truncated caller stdout can never lose it
   -s, --resume <id>       resume an existing grok session (fix loops)
       --sandbox <profile> sandbox profile (default workspace, auto-downgraded to
                           off with a warning where the kernel denies user
@@ -104,6 +108,10 @@ while [[ $# -gt 0 ]]; do
 		;;
 	-T | --max-turns)
 		max_turns="${2:?--max-turns needs a value}"
+		shift 2
+		;;
+	-o | --report)
+		report="${2:?--report needs a value}"
 		shift 2
 		;;
 	-s | --resume)
@@ -243,5 +251,11 @@ if ((dry_run)); then
 	exit 0
 fi
 
+# Every byte grok prints also lands in the report file, so a truncated or piped
+# stdout on the caller's side (a `tail`, a full buffer) can never lose the report.
+: "${report:=${TMPDIR:-/tmp}/grok-delegate-$$.report}"
+: >"$report"
+echo "grok-delegate: report -> $report  (full stdout, survives caller-side truncation)" >&2
+
 cd "$workdir"
-exec grok "${args[@]}"
+exec grok "${args[@]}" > >(tee -a "$report")

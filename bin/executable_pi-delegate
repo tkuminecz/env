@@ -37,6 +37,7 @@ timeout_mins=60
 stall_mins=3
 sample_secs=20
 heartbeat=""
+report=""
 
 usage() {
 	cat <<'EOF'
@@ -57,6 +58,9 @@ Options:
                         forever, healthy ones always burn cpu somewhere.
   -T, --timeout <mins>  backstop cap on total runtime, default 60; 0 disables.
                         Catches slow-but-alive runaways. Exits 124.
+  -o, --report <p>      tee the delegate's stdout (its final report) to this file
+                        (default $TMPDIR/pi-delegate-<pid>.report). The full
+                        report survives whatever the caller pipes stdout into.
       --heartbeat <p>   where to write cpu/liveness samples
                         (default $TMPDIR/pi-delegate-<pid>.heartbeat)
       --json            stream structured events (--mode json) instead of text
@@ -102,6 +106,10 @@ while [[ $# -gt 0 ]]; do
 		;;
 	-W | --stall)
 		stall_mins="${2:?--stall needs a value}"
+		shift 2
+		;;
+	-o | --report)
+		report="${2:?--report needs a value}"
 		shift 2
 		;;
 	--heartbeat)
@@ -196,6 +204,14 @@ if ((dry_run)); then
 fi
 
 cd "$workdir"
+
+# Every byte the delegate prints also lands in the report file, so a truncated or
+# piped stdout on the caller's side (a `tail`, a full buffer) can never lose the
+# report — that has cost two review rounds.
+: "${report:=${TMPDIR:-/tmp}/pi-delegate-$$.report}"
+: >"$report"
+exec > >(tee -a "$report")
+echo "pi-delegate: report -> $report  (full stdout, survives caller-side truncation)" >&2
 
 # No watchdog wanted: hand the process straight over.
 if ((timeout_mins == 0 && stall_mins == 0)); then

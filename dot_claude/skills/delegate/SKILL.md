@@ -16,10 +16,10 @@ All are verified working via `pi --provider <p> --model <m>`. Cost is equal (~ze
 | Model | Invoke as | Best at | Avoid for |
 |---|---|---|---|
 | **grok-4.5** | `--provider xai --model grok-4.5` | Default external workhorse. Strongest external model (#4 AA index, #1 agentic tool use; Terminal-Bench 83.3, SWE-bench Pro 64.7). Fast (~80 tok/s), ~2x more token-efficient than peers. Multi-file changes, harder execution tasks, professional-judgment work. 500K ctx. | Tasks needing >500K context |
-| **glm-5.2** | `--provider zai --model glm-5.2` (Tim's pi default) | Repo-scale long context (usable 1M — its headline feature). Iterative run-test-fix loops (measurably better when told to execute and self-verify than one-shot). Self-contained/single-file work, local bug review. Doesn't refuse security-adjacent tasks. Observed (6+ rows): reliably flags false premises in briefs instead of silently applying them — a strong premise-checker and docs/verification-sweep delegate (grok-4.5 is now confirmed at parity on premise checks). Docs caveat: glm drifts on the *semantics* of code it summarizes secondhand — put the exact wording for contract-bearing bullets in the brief. z.ai stalls when 2+ glm runs launch simultaneously — stagger them, and after 2 consecutive zero-CPU stalls reroute the package to grok CLI rather than retrying a third time. | Cross-file reasoning — quality wobbles when correctness spans many files (kilo.ai eval); use grok-4.5 or Claude there |
+| **glm-5.2** | `--provider zai --model glm-5.2` (Tim's pi default) | Repo-scale long context (usable 1M — its headline feature). Iterative run-test-fix loops (measurably better when told to execute and self-verify than one-shot). Self-contained/single-file work, local bug review. Doesn't refuse security-adjacent tasks. Observed (6+ rows): reliably flags false premises in briefs instead of silently applying them — a strong premise-checker and docs/verification-sweep delegate (grok-4.5 is now confirmed at parity on premise checks). Docs caveat: glm drifts on the *semantics* of code it summarizes secondhand — put the exact wording for contract-bearing bullets in the brief. z.ai stalls when 2+ glm runs launch simultaneously — stagger them, and after 2 consecutive zero-CPU stalls reroute the package to grok CLI rather than retrying a third time. The stall pattern also strikes solo staggered runs on bad days (2026-08-13: every glm attempt stalled) — after two strikes anywhere, **drop z.ai for the rest of the day**, not just for that package. | Cross-file reasoning — quality wobbles when correctness spans many files (kilo.ai eval); use grok-4.5 or Claude there |
 | **grok-build-0.1** | `--provider xai --model grok-build-0.1` | The mechanical-swarm lane: latency-sensitive small tasks and wide fan-outs of tiny packages — renames, scripted edits, lookups (100+ tok/s). Purpose-trained coding workhorse (SWE-bench Verified 70.8, successor to grok-code-fast). 256K ctx. 6 rows: on genuinely tiny mechanical packages it is an A (gate registration, 4m). Its failure is always the same phase — **the edits land, the report doesn't**: false "ruff clean" on a ruff-failing file, silently dropped coverage, and a sweep that went byte-complete then burned 15s of CPU in 39min and died in verify. Route it mechanical work freely, size the package small, and plan to re-run its gates and salvage its output yourself. | Anything needing judgment; anything gated by a hard external constraint CI can't see (see *Done means*); anything where you would actually rely on the report |
 | **grok-4.3** | `--provider xai --model grok-4.3` | Fallback 1M-ctx reasoning model if glm-5.2 is rate-limited on a long-context task. | Generally superseded by grok-4.5 |
-| **deepseek-v4-flash-0731** | `--provider openrouter --model deepseek/deepseek-v4-flash-0731` | **Trial lane, no LOG history yet** — route it low-stakes packages (sweeps, docs, small tests) to build a track record. 1M ctx, thinking supported, fast/cheap. NOTE: unlike the subs this is **pay-per-token via OpenRouter** (cheap, but not free) — don't make it the fan-out default until graded. Smoke-tested working 2026-08-10. | High-stakes or judgment-heavy packages until it has graded rows |
+| **deepseek-v4-flash-0731** | `--provider openrouter --model deepseek/deepseek-v4-flash-0731` | **Corroboration lane** (10 graded rows: 9 B, 1 A-): in multi-model sweeps and read-only review panels it reliably confirms other models' findings and lands a unique real one roughly every other run (a missed ci-config dep, an untested join, a missing frontend recovery path), but its reports are thinner, it has called authz OK where it wasn't, and its **line-number citations drift (off by up to 200 lines)** — verify by content, never by cite. Slow zero-CPU starts (5–7m) are common and look like hangs; give it a wide `-W`. Pay-per-token via OpenRouter (cheap, not free), and the provider itself flakes some days (hangs, upstream-closed). | Sole coverage of any surface — never the only model on a package; high-stakes or judgment-heavy work; anything where citation precision matters |
 
 Escalate back to **Claude subagents** (per CLAUDE.md routing) when the task holds open-ended judgment, needs conversation context, or must integrate with Agent-tool machinery (structured output schemas, worktree isolation, background notifications).
 
@@ -66,6 +66,12 @@ To make steps delegable in parallel rather than sequentially:
   sub can stall the whole round. Split large fan-outs across x.ai and z.ai deliberately —
   glm-5.2 (usable 1M ctx) owns the repo-scale sweep packages; grok takes the multi-file build
   packages. One sub throttling then costs half the round, not all of it.
+- **Smoke the providers before committing a fan-out.** Provider health varies by the day, not
+  the run: on 2026-08-13 both z.ai and OpenRouter were unusable (every attempt stalled or
+  dropped) while grok CLI went clean — the wasted launches, watchdog kills, and relaunches
+  cost more than the check. Before a multi-package round that leans on a secondary provider,
+  fire a trivial one-shot on it first; if it stalls, route the whole round to grok and stop
+  retrying that provider for the day.
 - **Cap concurrent launches at 2–3 per provider; stagger the rest.** A 6-way simultaneous launch
   starved BOTH providers: all six runs tripped the CPU-stall watchdog at least once, and z.ai
   stalled both glm runs launched in the same instant. Launch the first 2–3, then release the
@@ -74,6 +80,16 @@ To make steps delegable in parallel rather than sequentially:
   false-kills throttled-but-healthy ones. And route the concurrent grok-4.5 packages through
   **grok CLI**, not pi: on the same day pi-grok stalled repeatedly, grok CLI went 4/4 with zero
   stalls (see Path 1b).
+
+### Read-only review panels: the standing shape for merge-readiness reviews
+
+Three graded rounds (PR2419, JUS-2404, JUS-2281) settle it: for a final read-only review of a
+big diff, run a **4-model panel** — grok-4.5 @ grok CLI, glm-5.2 @ pi, deepseek @ pi/openrouter,
+plus one opus Agent as the reference report — all launched in the same message, all with
+`-o <report>` files. Every model has landed a unique real finding at least once, opus is
+consistently deepest, and cross-model corroboration is what upgrades a single-model finding to
+"real". Verify each unique finding by content (deepseek cites drift). Costs ~10–15m wall-clock
+for the whole panel; z.ai/OpenRouter strikes drop that lane, never the panel.
 
 ### TDD split: tests and implementation from different delegates
 
@@ -135,6 +151,11 @@ cd <workdir> && pi -p --no-session -ne --thinking low \
   So the answer to "is it alive?" is always one second away — `tail -3 <heartbeat>`: `dcpu>0` and
   `idle=0/N` means working, `idle` climbing means dying. **Check it at ~5 minutes and whenever you
   wonder.** Don't wait on the completion notification, and don't reason about elapsed time.
+- **Read the report from the report file, never from a piped stdout.** Both wrappers tee the
+  delegate's full stdout to a report file (`-o/--report <path>`, default
+  `$TMPDIR/<wrapper>-<pid>.report`, path echoed to stderr at launch). Two review-panel rows
+  lost their whole report tail to an orchestrator-side `tail -3` on stdout — the finding was in
+  the part that got cut. Pass `-o <scratchpad>/<pkg>.report` and read that file.
 
   **A watchdog kill is not a verdict of zero work — salvage first, relaunch second.** In the one
   6-way fan-out where all six runs got killed at least once, every kill except one had already
@@ -159,6 +180,7 @@ cd <workdir> && pi -p --no-session -ne --thinking low \
 ```sh
 grok-delegate -C <repo-root> -f <brief>               # brief file → native --prompt-file
 grok-delegate -C <repo-root> "<task>"                 # inline one-shot
+grok-delegate -o <scratchpad>/<pkg>.report ...        # tee full stdout to a report file (also default-on)
 grok-delegate --json '<schema>' ...                   # schema-constrained JSON report
 grok-delegate -s <session-id> "<fix instructions>"    # resume for a fix loop
 grok-delegate -n ...                                  # dry-run: print the grok command
@@ -255,6 +277,10 @@ For delegations bigger than a one-shot (a feature, a rebuild, parallel packages)
      feeding a fan-out, have an independent opus pass review the contract BEFORE launching
      builders — the one contract gap that reached review was a spec defect no builder could
      have caught.
+     The same bar covers **repo conventions the brief prescribes** — a briefed dbt test tag
+     (`data_quality`) made the delegate's singular test invisible to the harness and CI per the
+     repo's own docs; the delegate followed the brief exactly. Check tag/marker/registration
+     conventions against the repo docs before writing them into a spec.
      **Run every command the brief quotes, in the package it names, before shipping the brief.**
      A CONTRACT.md that said `pnpm vitest run <path>` from the repo root skipped the portal's
      jsdom config; both portal delegates then burned turns attributing ~30 phantom failures
@@ -324,7 +350,11 @@ For delegations bigger than a one-shot (a feature, a rebuild, parallel packages)
    suspicions and anything the builder's self-review dismissed*. Builder self-review raises
    the floor; it never substitutes for this. When a delegate documents a divergence as
    "intended by design", check it against the ticket's acceptance criterion rather than
-   against the implementation.
+   against the implementation. In read-only audit/sweep reports, the *finding* and its *fix
+   sketch* carry different reliability: findings backed by quoted code hold up, but the
+   remediation sketch is often wrong (a `ref()` on a column that doesn't exist; a cost the
+   sketch attributes to a path that's gated off). Verify sketches independently — a wrong
+   sketch does not invalidate the finding, and a real finding does not validate the sketch.
 5. **Fix pass, push, cleanup.** Confirmed findings go **back to the builder, not to your own editor** — the builder holds the package context; hand-fixing burns Claude time re-deriving it and silently takes Claude out of the reviewer seat. Fix by hand only when the fix is smaller than the brief for it. **Prefer a fresh one-shot carrying the fix list over resuming the session** (pi session-resume hung 3 of 4 attempts; both fresh fix one-shots finished in ~20m) — a fix list is self-contained enough that the lost context rarely matters. grok CLI resume (`grok-delegate -s <session-id>`) has not hung. Re-run the battery, push, then remove the worktree.
 6. If the target branch moved while the builder ran, expect conflicts in shared files — resolve keeping both intents, never discard either side blind.
 
