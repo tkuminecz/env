@@ -42,7 +42,9 @@ install_pi() {
   fi
   ensure_node || return
   echo "installing pi (@earendil-works/pi-coding-agent)..."
-  npm install -g @earendil-works/pi-coding-agent
+  # Explicit prefix (~/.local) keeps pi out of mise shims, which have no
+  # version binding for arbitrary npm-global tools and error at runtime.
+  npm install -g --prefix "$HOME/.local" @earendil-works/pi-coding-agent
 }
 
 install_grok() {
