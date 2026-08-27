@@ -57,9 +57,16 @@ install_pi() {
   fi
   install_node || return
   echo "installing pi (@earendil-works/pi-coding-agent)..."
-  # Explicit prefix (~/.local) keeps pi out of mise shims, which have no
-  # version binding for arbitrary npm-global tools and error at runtime.
-  npm install -g --prefix "$HOME/.local" @earendil-works/pi-coding-agent
+  # Prefer fnm's default node (how both this Mac and tim-dev run pi):
+  # global npm there lands on the interactive shell's path. Fall back to
+  # ~/.local (with mise/brew node) only when fnm is absent. mise shims
+  # are avoided entirely: they have no version binding for arbitrary
+  # npm-global tools and error at runtime.
+  if command -v fnm >/dev/null 2>&1 && fnm exec --using default -- command -v npm >/dev/null 2>&1; then
+    fnm exec --using default -- npm install -g @earendil-works/pi-coding-agent
+  else
+    npm install -g --prefix "$HOME/.local" @earendil-works/pi-coding-agent
+  fi
 }
 
 install_grok() {
