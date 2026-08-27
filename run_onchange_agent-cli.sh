@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Install the agent CLIs the synced dotfiles expect: pi (Agent harness)
 # and grok (xAI CLI), plus pi's shared pi-kit package. Idempotent — safe to
 # re-run whenever this file changes.
