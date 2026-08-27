@@ -16,9 +16,14 @@ ensure_node() {
   if command -v mise >/dev/null 2>&1; then
     mise use -g node@lts
     # mise's shims aren't on PATH in this non-interactive shell; add them
-    local mise_bin
-    if mise_bin=$(mise bin-path 2>/dev/null); then
-      PATH="$mise_bin:$PATH"
+    local mise_bins
+    if mise_bins=$(mise bin-paths 2>/dev/null); then
+      for d in $mise_bins; do
+        case ":$PATH:" in
+          *":$d:"*) : ;;
+          *) PATH="$d:$PATH" ;;
+        esac
+      done
       export PATH
     fi
   elif [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
