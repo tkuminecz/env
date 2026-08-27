@@ -8,15 +8,11 @@
     stamp never survives, so pi re-shows the changelog on every update.
   */}}
 
-  {{- /* Per-machine provider/model. Edit the hostnames to match your machines. */}}
+  {{- /* Universal default: Luna. Override per-machine below if any box should differ. */}}
   {{- if eq .chezmoi.hostname "workbox" }}
   "defaultProvider": "openrouter",
   "defaultModel": "deepseek/deepseek-v4-flash-0731",
-  {{- else if eq .chezmoi.hostname "tim-macbook-pro-wifi" }}
-  "defaultProvider": "pi-claude-cli",
-  "defaultModel": "claude-fable-5",
   {{- else }}
-  {{- /* Default for every other machine (incl. tim-dev + new boxes): Luna. */}}
   "defaultProvider": "openrouter",
   "defaultModel": "openai/gpt-5.6-luna",
   {{- end }}
@@ -34,7 +30,9 @@
     "npm:@baretread/pi-forge",
     "npm:pi-cc-header",
     "npm:pi-claude-cli",
-    "npm:@ogulcancelik/pi-herdr"
+    "npm:@ogulcancelik/pi-herdr",
+    "npm:pi-subagents",
+    "npm:pi-powerline-footer"
   ],
 
   "quietStartup": true,
