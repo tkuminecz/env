@@ -15,6 +15,12 @@ ensure_node() {
   echo "node/npm missing — provisioning..."
   if command -v mise >/dev/null 2>&1; then
     mise use -g node@lts
+    # mise's shims aren't on PATH in this non-interactive shell; add them
+    local mise_bin
+    if mise_bin=$(mise bin-path 2>/dev/null); then
+      PATH="$mise_bin:$PATH"
+      export PATH
+    fi
   elif [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
     brew install node
   elif [ "$(uname -s)" = "Linux" ] && command -v apt-get >/dev/null 2>&1; then
