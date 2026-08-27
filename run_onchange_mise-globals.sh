@@ -8,6 +8,7 @@ if ! command -v mise >/dev/null 2>&1; then
   exit 0
 fi
 mise use -g \
+  node@lts \
   npm:firecrawl-cli@latest \
   rust@latest \
   usage@latest
