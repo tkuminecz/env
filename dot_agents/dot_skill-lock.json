@@ -297,6 +297,15 @@
       "skillFolderHash": "7eb8f2230ffcb421672e5ed092c4b3c48c7f9527",
       "installedAt": "2026-07-16T20:39:45.707Z",
       "updatedAt": "2026-07-16T20:39:45.707Z"
+    },
+    "progress-check": {
+      "source": "tjcages/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/tjcages/skills.git",
+      "skillPath": "progress-check/skills/progress-check/SKILL.md",
+      "skillFolderHash": "b1f5b8f43e4ce718a8a7bc506eb83a660c67a6b0",
+      "installedAt": "2026-08-28T06:35:11.707Z",
+      "updatedAt": "2026-08-28T06:35:11.707Z"
     }
   },
   "dismissed": {}
