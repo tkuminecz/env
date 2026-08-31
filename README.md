@@ -6,6 +6,9 @@ Nothing syncs automatically — you always review first, then apply.
 
 ## Daily workflow
 
+Periodic housekeeping (updates for pi, skills, chezmoi): see
+[docs/maintenance.md](docs/maintenance.md).
+
 ```sh
 chezmoi diff              # preview exactly what would change on this machine
 chezmoi apply             # make it so (only when you say so)
