@@ -34,7 +34,9 @@ json_mode=0
 dry_run=0
 prompt=""
 timeout_mins=60
-stall_mins=3
+# default 6: 3 false kills of healthy glm/deepseek runs (slow zero-CPU starts) in one
+# retro window; a true stall just gets caught 3min later, which is cheap by comparison
+stall_mins=6
 sample_secs=20
 heartbeat=""
 report=""
@@ -53,7 +55,7 @@ Options:
   -s, --session <uuid>  reuse/create a pi session for follow-up turns
                         [prefer a fresh one-shot for fix loops — resume hangs]
   -W, --stall <mins>    kill the run once its whole process tree has burned ZERO
-                        cpu for this long, default 3; 0 disables. Exits 125.
+                        cpu for this long, default 6; 0 disables. Exits 125.
                         This is the real hang detector — hung runs block on I/O
                         forever, healthy ones always burn cpu somewhere.
   -T, --timeout <mins>  backstop cap on total runtime, default 60; 0 disables.
@@ -201,6 +203,15 @@ if ((dry_run)); then
 	printf ' %q' "${args[@]}" "$prompt"
 	printf '\n'
 	exit 0
+fi
+
+# Nothing else checks the retro trigger, so every real launch does (never fails the run).
+command -v delegate-retro-due >/dev/null 2>&1 && delegate-retro-due >&2 || true
+
+# The Write/Edit tools have turned a "\u00a0" escape into a literal NBSP, and that shipped
+# straight into a delegate's test. Warn only; never fails the run.
+if [[ -n "$brief_file" ]] && command -v delegate-brief-check >/dev/null 2>&1; then
+	delegate-brief-check "$abs_brief" >&2 || true
 fi
 
 cd "$workdir"

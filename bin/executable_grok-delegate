@@ -251,6 +251,15 @@ if ((dry_run)); then
 	exit 0
 fi
 
+# Nothing else checks the retro trigger, so every real launch does (never fails the run).
+command -v delegate-retro-due >/dev/null 2>&1 && delegate-retro-due >&2 || true
+
+# The Write/Edit tools have turned a "\u00a0" escape into a literal NBSP, and that shipped
+# straight into a delegate's test. Warn only; never fails the run.
+if [[ -n "$brief_file" ]] && command -v delegate-brief-check >/dev/null 2>&1; then
+	delegate-brief-check "$abs_brief" >&2 || true
+fi
+
 # Every byte grok prints also lands in the report file, so a truncated or piped
 # stdout on the caller's side (a `tail`, a full buffer) can never lose the report.
 : "${report:=${TMPDIR:-/tmp}/grok-delegate-$$.report}"
