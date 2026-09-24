@@ -81,7 +81,9 @@ default — decompose for width first, not a sequential plan with a couple of de
 
 **Delegate by default** — don't deliberate, write the brief and go:
 
-- writing tests to a spec, or turning a described bug into a failing test
+- writing tests to a spec, or turning a described bug into a failing test — and for any package
+  worth TDD, split it: one delegate writes the RED suite blind, another implements to green and
+  may not edit the tests (validated 4/4 A across three providers)
 - mechanical refactors, renames, signature changes across files
 - boilerplate scaffolding — new service file sets, charts, config plumbing
 - "make this lint / typecheck / format clean"
@@ -93,7 +95,11 @@ default — decompose for width first, not a sequential plan with a couple of de
 **Don't delegate**:
 
 - anything touching prod, secrets, credentials, or live infra
-- DB migrations and other irreversible or hard-to-review changes
+- applying migrations to any shared database, and other irreversible or hard-to-review changes.
+  *Writing* a migration revision against a schema contract I pinned is delegable. All 7 such
+  packages graded A (08-20→09-22), and the one defect that turned up was in my contract. The
+  brief names the 32-char revision-id cap and requires `upgrade head` then `downgrade` on real
+  Postgres, or offline `--sql` with the live run owed to me
 - work where writing the spec *is* the hard part — if I can't write the brief, delegating only moves the problem
 - anything needing this conversation's context that won't fit in a brief
 - final judgment calls: what to ship, what to tell Tim, whether a review finding is real

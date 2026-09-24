@@ -47,7 +47,8 @@ break the production code under test, paste the failing output, restore it byte-
 substrings. Fakes and fixtures pin literal expected values and never re-derive them from the
 inputs. Tests written ahead of an implementation still owe that proof, whatever order things
 land in. If the implementation isn't there yet, prove RED against its absence or against a
-scratch implementation of the contract under `/tmp`. If a sibling landed it first, mutate the
+scratch implementation of the contract under `/tmp`. Never write that scratch
+implementation in the repo tree, where it breaches your fence and sits in a sibling's way. If a sibling landed it first, mutate the
 production code. Never skip the proof because the suite came up green. A skipped test is not a passing test, and a mocked integration test defeats the
 purpose of the tier.
 

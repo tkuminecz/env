@@ -21,9 +21,9 @@
 # Sandbox auto-fallback: grok's sandbox needs unprivileged user namespaces, which
 # some hosts deny (jb-dev: "bwrap: setting up uid map: Permission denied"). grok
 # then exits 0 with a one-line error that reads as SUCCESS in a task notification,
-# so the run silently does nothing. When --sandbox was not passed explicitly we
+# so the run silently does nothing. Without an explicit --sandbox we
 # probe the primitive and fall back to `off` with a loud warning rather than
-# handing back a fake success.
+# handing back a fake success; an explicit profile that cannot be honoured exits 2.
 #
 # Playbook, briefs, review pipeline and scorecard: ~/.claude/skills/delegate/
 
@@ -198,11 +198,18 @@ fi
 
 # Unprivileged user namespaces are what the sandbox is built on; if the kernel
 # denies them, an unattended sandboxed run fails as a fake success (see header).
-if ((!sandbox_explicit)) && [[ "$sandbox" != off ]]; then
+if [[ "$sandbox" != off ]]; then
 	# Only conclude "denied" when bwrap exists and fails — if it is absent, grok may
 	# be sandboxing by some other means and we must not weaken it on a guess.
 	if command -v bwrap >/dev/null 2>&1 &&
 		! bwrap --dev-bind / / --unshare-user true >/dev/null 2>&1; then
+		# An explicit profile (e.g. read-only for a review panel) is a posture the
+		# caller asked for; silently weakening it is worse than refusing to run.
+		if ((sandbox_explicit)); then
+			echo "grok-delegate: --sandbox $sandbox requested, but user namespaces are denied on this host." >&2
+			echo "grok-delegate: grok would exit 0 having done nothing. Drop --sandbox (auto-downgrade) and fence with --deny rules." >&2
+			exit 2
+		fi
 		echo "grok-delegate: user namespaces denied on this host — falling back to --sandbox off." >&2
 		echo "grok-delegate: the deny rules still apply; keep the fence in the brief." >&2
 		sandbox="off"
