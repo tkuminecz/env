@@ -102,6 +102,9 @@ default — decompose for width first, not a sequential plan with a couple of de
   Postgres, or offline `--sql` with the live run owed to me
 - work where writing the spec *is* the hard part — if I can't write the brief, delegating only moves the problem
 - anything needing this conversation's context that won't fit in a brief
+- live-environment evidence: MCP-backed queries (dagster-plus, Superset, Sentry) and
+  in-process harness measurements. Delegates have no MCP, so pair their sweep with a Claude
+  lane for that part
 - final judgment calls: what to ship, what to tell Tim, whether a review finding is real
 
 Two wrappers on PATH, both dry-runnable with `-n`, never hand-composed flags: **`grok-delegate`**

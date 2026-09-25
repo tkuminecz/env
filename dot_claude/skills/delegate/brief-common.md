@@ -30,7 +30,8 @@ explicitly overrides one of them, follow the brief.
 
 Code, comments, docstrings and docs outlive this round. Do not write any of these into them:
 package names, brief or contract section labels (for example "CONTRACT E3", "§4", "lane B"),
-ticket ids in new code, or narration of the change ("now", "no longer", "was changed to").
+ticket ids in new code, narration of the change ("now", "no longer", "was changed to"), or descriptions of the
+pre-fix state ("today", "currently", "until the fix lands").
 
 ## Evidence, not claims
 
@@ -51,6 +52,13 @@ scratch implementation of the contract under `/tmp`. Never write that scratch
 implementation in the repo tree, where it breaches your fence and sits in a sibling's way. If a sibling landed it first, mutate the
 production code. Never skip the proof because the suite came up green. A skipped test is not a passing test, and a mocked integration test defeats the
 purpose of the tier.
+
+Any proof run outside the main checkout (a detached worktree or a `/tmp` copy) must first
+show which source it imports. The `pytest`/`python` on PATH belongs to the main checkout's
+`.venv` and imports the *original* tree, so your mutation would never run. Before the proof,
+paste `python -c 'import <pkg>; print(<pkg>.__file__)'`, run with the same interpreter you
+test with, and confirm that the path is inside your copy. If it isn't, set `PYTHONPATH` to
+your copy's package directories and check again.
 
 If you notice an issue in your own output, fix it or argue it in the deviations report.
 Don't just mention it.
