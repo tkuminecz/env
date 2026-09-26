@@ -1,0 +1,16 @@
+{
+  "providers": {
+    "xai": {
+      "models": [
+        {
+          "id": "grok-build-0.1",
+          "name": "Grok Build 0.1",
+          "reasoning": false,
+          "input": ["text", "image"],
+          "contextWindow": 256000,
+          "maxTokens": 230400
+        }
+      ]
+    }
+  }
+}
