@@ -4,28 +4,28 @@
     {
       "name": "force-push",
       "tool": "Bash",
-      "pattern": "git\\s+push\\s+.*--force",
+      "check": "git-force-push",
       "description": "Force pushing to remote",
       "severity": "warn"
     },
     {
       "name": "destructive-rm",
       "tool": "Bash",
-      "pattern": "rm\\s+(-[a-zA-Z]*r[a-zA-Z]*|--recursive)",
-      "description": "Recursive delete operations",
-      "severity": "warn"
+      "check": "recursive-rm",
+      "description": "Recursive delete of something that can't be recovered",
+      "severity": "block"
     },
     {
       "name": "drop-table",
       "tool": "Bash",
-      "pattern": "(?i)DROP\\s+(TABLE|DATABASE)",
-      "description": "SQL DROP TABLE statements",
+      "check": "sql-drop",
+      "description": "Dropping a table, database or schema",
       "severity": "warn"
     },
     {
       "name": "env-secrets",
       "tool": "Bash",
-      "pattern": "cat\\s+.*\\.env",
+      "check": "secret-env-read",
       "description": "Reading .env files that may contain secrets",
       "severity": "warn"
     }
