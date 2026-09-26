@@ -22,7 +22,7 @@ Router — four outcomes:
 1. Top-of-range judgment work (the fable list below)? → **fable**, in the background.
 2. Open-ended judgment left? → **opus**.
 3. No judgment left, and there's a way to verify it (tests/build/lint/typecheck)? → **delegate externally
-   via `pi`**, default model `grok-4.5`.
+   via `pi`**, default model `grok-4.6`.
 4. Same as 3, but the result needs Agent-tool machinery or this conversation's context? → **sonnet**.
 
 This governs subagents and external delegation only — my own interactive model is set via /model, not here.
@@ -56,9 +56,9 @@ output quality — state the goal, the constraints, and what done looks like, th
 That is the opposite of how to brief sonnet or an external pi delegate, where enumerated steps help. Run it
 in the background: single fable turns on hard tasks routinely take many minutes, and that's expected, not a hang.
 
-## External delegation: GLM + Grok via `pi` or herdr
+## External delegation: GLM, Grok and Codex via `pi`, herdr or queohoh
 
-Tim pays flat-rate subs for z.ai (GLM 5.2) and x.ai SuperGrok (Grok 4.5, grok-build-0.1), both wired into the `pi` coding agent. A delegated task costs nothing against Anthropic quota, and a bad one costs a `git diff` and a discard. So **external is the default for verifiable execution work** — not a special-occasion alternative I reach for when asked. Opus/fable routing is unchanged.
+Tim pays flat-rate subs for z.ai (GLM 5.3 / 5.3-flash / 5.2), x.ai SuperGrok (Grok 4.6, grok-build-0.1) and OpenAI Codex (`gpt-*`, e.g. Codex Luna), all wired into the `pi` coding agent (OpenRouter's DeepSeek models are wired in too, but bill per token). A delegated task costs nothing against Anthropic quota, and a bad one costs a `git diff` and a discard. So **external is the default for verifiable execution work** — not a special-occasion alternative I reach for when asked. Opus/fable routing is unchanged.
 
 **Route at plan time.** When a plan is approved, tag every step `grok` / `glm` / `claude` before
 starting any of them — an untagged step drifts to the expensive lane by inertia. Decompose plans
@@ -81,13 +81,17 @@ so steps are delegable in parallel (interface-first, packages disjoint by file o
 - work where writing the spec *is* the hard part — if I can't write the brief, delegating only moves the problem
 - anything needing this conversation's context that won't fit in a brief
 - final judgment calls: what to ship, what to tell Tim, whether a review finding is real
+- program-sized builds (≳3k changed lines or a whole subsystem): Opus builds those. In the mgc
+  ledger, 20 Opus-built lanes had zero C grades; external builders at that size hit lane caps,
+  429s and review timeouts, or skipped the gate. Use external only when Anthropic usage is the
+  binding limit, and then behind a mechanical gate (skill: "Size line")
 
 Two wrappers on PATH, both dry-runnable with `-n`, never hand-composed flags: **`grok-delegate`**
-for unattended grok-4.5 package builds via the grok CLI (bakes in kernel sandbox, deny rules,
-`--max-turns`, schema-constrained reports; the sub exposes only grok-4.5 there), and
-**`pi-delegate`** for everything else — GLM models, **grok-build-0.1** (the mechanical-swarm lane:
-fast small edits and wide tiny fan-outs; still unproven in the log — give it reps), quick
-one-shots, and session fix loops. It bakes in the mandatory `--thinking low`, re-adds the
+for unattended grok package builds via the grok CLI (deny rules, `--max-turns`,
+schema-constrained reports; its kernel sandbox needs bubblewrap, not yet installed here), and
+**`pi-delegate`** for everything else — GLM models, Codex (`-m gpt-5.6-luna`), OpenRouter ids,
+**grok-build-0.1** (the mechanical-swarm lane: fast small edits and wide tiny fan-outs; first reps
+2026-09-26), quick one-shots, and session fix loops. It bakes in the mandatory `--thinking low`, re-adds the
 permission-gate extension that `-ne` strips, and derives the provider from the model name. Load
 the `delegate` skill for the full playbook (brief template, decompose-for-delegation, worktree
 pipeline, review step, scorecard). Non-negotiables: require self-verification in every brief,
