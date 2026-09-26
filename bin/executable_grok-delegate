@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# grok-delegate — unattended one-shot delegation to grok-4.5 via the official grok CLI.
+# grok-delegate — unattended one-shot delegation to grok-4.6 (grok CLI also offers grok-4.5).
 # Sibling of pi-delegate; reach for this harness when the run should be sandboxed,
 # deny-ruled, turn-capped, or must emit schema-constrained JSON. pi-delegate stays
 # the road to GLM models and grok-build.
@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-model="grok-4.5"
+model="grok-4.6"
 workdir="$PWD"
 brief_file=""
 resume=""
@@ -31,6 +31,7 @@ worktree_ref=""
 default_denies=1
 dry_run=0
 prompt=""
+report=""
 extra_rules=()
 
 DEFAULT_DENIES=(
@@ -46,8 +47,7 @@ Usage: grok-delegate [options] "<task>"
        grok-delegate [options] -f <brief-file>
 
 Options:
-  -m, --model <id>        model passthrough (default grok-4.5 — the only model
-                          this sub exposes in the grok CLI)
+  -m, --model <id>        model passthrough (default grok-4.6; grok CLI also offers grok-4.5)
   -C, --dir <path>        working dir for the delegate (default: cwd). Use the
                           repo root so grok discovers AGENTS.md / project config.
   -f, --file <path>       brief file; passed natively via --prompt-file <abs>
@@ -64,6 +64,9 @@ Options:
                           --worktree-ref (its default base is a footgun, and it
                           skips wt hooks; prefer `wt switch --create` + -C)
       --worktree-ref <r>  base ref for --worktree
+  -o, --report <p>        tee the delegate's stdout (its final report) to this
+                          file (default $TMPDIR/grok-delegate-<pid>.report) so a
+                          piped or truncated caller stdout can never lose it
   -n, --dry-run           print the grok command without running it
   -h, --help              show this
 
@@ -101,6 +104,10 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--json)
 		json_schema="${2:?--json needs a schema}"
+		shift 2
+		;;
+	-o | --report)
+		report="${2:?--report needs a value}"
 		shift 2
 		;;
 	--allow)
@@ -172,6 +179,18 @@ fi
 	exit 2
 }
 
+# Preflight for sandbox: grok's non-off sandboxes require bwrap (bubblewrap) on Linux.
+# GROK_DELEGATE_BWRAP (default bwrap) lets tests simulate missing bwrap via command -v.
+if [[ "$sandbox" != "off" ]] && ! command -v "${GROK_DELEGATE_BWRAP:-bwrap}" >/dev/null 2>&1; then
+	msg="grok-delegate: --sandbox $sandbox needs bubblewrap (bwrap), which is not installed. Install it (sudo apt install bubblewrap) or pass --sandbox off (drops the kernel write fence; deny rules still apply)."
+	if ((dry_run)); then
+		echo "WARNING: $msg" >&2
+	else
+		echo "$msg" >&2
+		exit 2
+	fi
+fi
+
 args=(
 	--model "$model"
 	--permission-mode bypassPermissions
@@ -215,4 +234,11 @@ if ((dry_run)); then
 fi
 
 cd "$workdir"
-exec grok "${args[@]}"
+
+# Every byte grok prints also lands in the report file, so a truncated or piped
+# stdout on the caller's side (a `tail`, a full buffer) can never lose the report.
+: "${report:=${TMPDIR:-/tmp}/grok-delegate-$$.report}"
+: >"$report"
+echo "grok-delegate: report -> $report  (full stdout, survives caller-side truncation)" >&2
+
+exec grok "${args[@]}" > >(tee -a "$report")

@@ -31,7 +31,8 @@ run_gd() {
 	stdout_f="$(mktemp)"
 	stderr_f="$(mktemp)"
 	set +e
-	"$GROK_DELEGATE" "$@" >"$stdout_f" 2>"$stderr_f"
+	# Real runs tee a report into $TMPDIR; keep it inside the suite's scratch dir.
+	TMPDIR="$SCRATCHPAD" "$GROK_DELEGATE" "$@" >"$stdout_f" 2>"$stderr_f"
 	run_status=$?
 	set -e
 	run_stdout="$(cat "$stdout_f")"
@@ -58,7 +59,7 @@ assert_not_contains() {
 run_gd -n "do a thing"
 if [[ $run_status -eq 0 ]] &&
 	assert_contains "$run_stdout" "--model" &&
-	assert_contains "$run_stdout" "grok-4.5" &&
+	assert_contains "$run_stdout" "grok-4.6" &&
 	assert_contains "$run_stdout" "--permission-mode" &&
 	assert_contains "$run_stdout" "bypassPermissions" &&
 	assert_contains "$run_stdout" "--sandbox" &&
@@ -345,6 +346,89 @@ if [[ $run_status -eq 0 ]] &&
 else
 	fail "17 dry-run stdout starts with cd and contains && grok" \
 		"status=$run_status stdout=$run_stdout"
+fi
+
+# --- 18. default sandbox, bwrap absent via override, real run: exit 2, marker absent ---
+# Verifies preflight exits 2 without running grok when the bwrap lookup (via GROK_DELEGATE_BWRAP) fails on default sandbox.
+marker18="$SCRATCHPAD/grok-ran-18"
+stubdir18="$SCRATCHPAD/stubs-18"
+mkdir -p "$stubdir18"
+cat >"$stubdir18/grok" <<EOF
+#!/usr/bin/env bash
+touch "$marker18"
+exit 0
+EOF
+chmod +x "$stubdir18/grok"
+GROK_DELEGATE_BWRAP=grok-delegate-test-no-such-bwrap PATH="$stubdir18:$PATH" run_gd "do a thing"
+if [[ $run_status -eq 2 ]] &&
+	assert_contains "$run_stderr" "needs bubblewrap" &&
+	[[ ! -f "$marker18" ]]; then
+	pass "18 default sandbox, bwrap absent, real run: exits 2, warns, no grok run"
+else
+	fail "18 default sandbox, bwrap absent, real run: exits 2, warns, no grok run" \
+		"status=$run_status stderr='$run_stderr' marker_present=$( [[ -f "$marker18" ]] && echo yes || echo no )"
+fi
+
+# --- 19. --sandbox off, bwrap absent via override, real run: no message, grok ran ---
+# Verifies --sandbox off skips the bwrap preflight check (grok still runs even if lookup would fail).
+marker19="$SCRATCHPAD/grok-ran-19"
+stubdir19="$SCRATCHPAD/stubs-19"
+mkdir -p "$stubdir19"
+cat >"$stubdir19/grok" <<EOF
+#!/usr/bin/env bash
+touch "$marker19"
+exit 0
+EOF
+chmod +x "$stubdir19/grok"
+GROK_DELEGATE_BWRAP=grok-delegate-test-no-such-bwrap PATH="$stubdir19:$PATH" run_gd --sandbox off "do a thing"
+if [[ $run_status -eq 0 ]] &&
+	assert_not_contains "$run_stderr" "bubblewrap" &&
+	assert_not_contains "$run_stderr" "needs bubblewrap" &&
+	[[ -f "$marker19" ]]; then
+	pass "19 --sandbox off, bwrap absent, real run: no bwrap msg, grok ran"
+else
+	fail "19 --sandbox off, bwrap absent, real run: no bwrap msg, grok ran" \
+		"status=$run_status stderr='$run_stderr' marker=$( [[ -f "$marker19" ]] && echo yes || echo no )"
+fi
+
+# --- 20. default sandbox, bwrap absent via override, dry-run: 0 + cmd on stdout + WARNING on stderr ---
+# Verifies dry-run path warns on stderr but still prints the full command and exits 0 (does not hard-fail).
+GROK_DELEGATE_BWRAP=grok-delegate-test-no-such-bwrap run_gd -n "do a thing"
+if [[ $run_status -eq 0 ]] &&
+	assert_contains "$run_stdout" "--sandbox workspace" &&
+	assert_contains "$run_stderr" "WARNING:" &&
+	assert_contains "$run_stderr" "needs bubblewrap"; then
+	pass "20 default sandbox, bwrap absent, dry-run: 0, cmd on stdout, WARNING+needs on stderr"
+else
+	fail "20 default sandbox, bwrap absent, dry-run: 0, cmd on stdout, WARNING+needs on stderr" \
+		"status=$run_status stdout='$run_stdout' stderr='$run_stderr'"
+fi
+
+# --- 21. default sandbox, bwrap present via stub, real run: no message, grok ran ---
+# Verifies that when bwrap is found on PATH (no override), preflight passes and grok is invoked.
+marker21="$SCRATCHPAD/grok-ran-21"
+stubdir21="$SCRATCHPAD/stubs-21"
+mkdir -p "$stubdir21"
+cat >"$stubdir21/grok" <<EOF
+#!/usr/bin/env bash
+touch "$marker21"
+exit 0
+EOF
+chmod +x "$stubdir21/grok"
+cat >"$stubdir21/bwrap" <<'BWRAP'
+#!/usr/bin/env bash
+exit 0
+BWRAP
+chmod +x "$stubdir21/bwrap"
+PATH="$stubdir21:$PATH" run_gd "do a thing"
+if [[ $run_status -eq 0 ]] &&
+	assert_not_contains "$run_stderr" "bubblewrap" &&
+	assert_not_contains "$run_stderr" "needs bubblewrap" &&
+	[[ -f "$marker21" ]]; then
+	pass "21 default sandbox, bwrap present, real run: no msg, grok ran"
+else
+	fail "21 default sandbox, bwrap present, real run: no msg, grok ran" \
+		"status=$run_status stderr='$run_stderr' marker=$( [[ -f "$marker21" ]] && echo yes || echo no )"
 fi
 
 echo

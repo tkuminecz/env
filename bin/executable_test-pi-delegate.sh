@@ -55,16 +55,18 @@ assert_not_contains() {
 	esac
 }
 
-# --- 1. Default invocation resolves to --provider xai --model grok-4.5 ---
+# --- 1. Default invocation resolves to --provider xai --model grok-4.6 ---
+# Every bare `pi-delegate "<task>"` call gets the default, so a wrong default silently
+# moves all delegation to another model or provider.
 run_pd -n "do a thing"
 if [[ $run_status -eq 0 ]] &&
 	assert_contains "$run_stdout" "--provider" &&
 	assert_contains "$run_stdout" "xai" &&
 	assert_contains "$run_stdout" "--model" &&
-	assert_contains "$run_stdout" "grok-4.5"; then
-	pass "1 default provider/model is xai / grok-4.5"
+	assert_contains "$run_stdout" "grok-4.6"; then
+	pass "1 default provider/model is xai / grok-4.6"
 else
-	fail "1 default provider/model is xai / grok-4.5" "status=$run_status stdout=$run_stdout"
+	fail "1 default provider/model is xai / grok-4.6" "status=$run_status stdout=$run_stdout"
 fi
 
 # --- 2. --thinking low is present by default ---
@@ -101,7 +103,9 @@ else
 fi
 
 # --- 4. Unrecognized model exits 2; error on stderr not stdout ---
-run_pd -n -m gpt-5 "do a thing"
+# An id no arm matches must fail loudly (exit 2, message on stderr) instead of guessing
+# a provider; llama-4 is used because glm*, grok*, gpt* and vendor/model ids all route.
+run_pd -n -m llama-4 "do a thing"
 if [[ $run_status -eq 2 ]] &&
 	[[ -n "$run_stderr" ]] &&
 	assert_contains "$run_stderr" "cannot infer provider" &&
@@ -303,6 +307,20 @@ if [[ $run_status -eq 0 ]] &&
 	pass "15 z-ai/glm-* routes to openrouter, not zai"
 else
 	fail "15 z-ai/glm-* routes to openrouter, not zai" \
+		"status=$run_status stdout='$run_stdout' stderr='$run_stderr'"
+fi
+
+# --- 16. gpt-* routes to openai-codex ---
+# gpt-* ids must reach the flat-rate openai-codex subscription; falling through to
+# openrouter would bill per token for the same model.
+run_pd -n -m gpt-5.6-luna "do a thing"
+if [[ $run_status -eq 0 ]] &&
+	assert_contains "$run_stdout" "--provider openai-codex" &&
+	assert_contains "$run_stdout" "--model gpt-5.6-luna" &&
+	assert_not_contains "$run_stdout" "--provider openrouter"; then
+	pass "16 gpt-* routes to openai-codex"
+else
+	fail "16 gpt-* routes to openai-codex" \
 		"status=$run_status stdout='$run_stdout' stderr='$run_stderr'"
 fi
 
