@@ -16,9 +16,12 @@ All are verified working via `pi --provider <p> --model <m>`. Cost is equal (~ze
 | Model | Invoke as | Best at | Avoid for |
 |---|---|---|---|
 | **grok-4.5** | `--provider xai --model grok-4.5` | Default external workhorse. Strongest external model (#4 AA index, #1 agentic tool use; Terminal-Bench 83.3, SWE-bench Pro 64.7). Fast (~80 tok/s), ~2x more token-efficient than peers. Multi-file changes, harder execution tasks, professional-judgment work. 500K ctx. | Tasks needing >500K context |
-| **glm-5.2** | `--provider zai --model glm-5.2` (Tim's pi default) | Repo-scale long context (usable 1M — its headline feature). Iterative run-test-fix loops (measurably better when told to execute and self-verify than one-shot). Self-contained/single-file work, local bug review. Doesn't refuse security-adjacent tasks. Observed (4/4 A on scoped packages): reliably flags false premises in briefs instead of silently applying them — good premise-checker. | Cross-file reasoning — quality wobbles when correctness spans many files (kilo.ai eval); use grok-4.5 or Claude there |
-| **grok-build-0.1** | `--provider xai --model grok-build-0.1` | The mechanical-swarm lane: latency-sensitive small tasks and wide fan-outs of tiny packages — renames, scripted edits, lookups (100+ tok/s). Purpose-trained coding workhorse (SWE-bench Verified 70.8, successor to grok-code-fast). 256K ctx. **Benchmark-faith row — still zero LOG.md rows after two retro cycles.** Hard rule until 3 rows exist: the next mechanical task (rename, scripted edit, lint sweep, tiny fan-out package) routes here, not to grok-4.5. | Anything needing judgment |
+| **glm-5.2** | `--provider zai --model glm-5.2` (Tim's pi default) | Repo-scale long context (usable 1M — its headline feature). Iterative run-test-fix loops (measurably better when told to execute and self-verify than one-shot). Self-contained/single-file work, local bug review. Doesn't refuse security-adjacent tasks. **Proven sweet spot (n=13, 85% A)**: blind pin batteries with verbatim corpus, mutation proofs, and the deviations-report clause. Reliably flags false premises in briefs instead of silently applying them — good premise-checker. | Cross-file reasoning — quality wobbles when correctness spans many files (kilo.ai eval); use grok-4.5 or Claude there |
+| **glm-5.3** | `--provider zai --model glm-5.3` | External implementation workhorse — **n=9 reps, two clean modes**. Rules-semantic engine waves are **B by default (6/6)**, always fixable to A in one round after opus calibration surfaces cross-surface seam escapes (widened-row-inherits-combinator-lies, zone-reach, decision-offer scope). Cross-surface non-engine work is **A (2/2)** even at service+ui+sidecar+e2e scope. Same 1M-ctx envelope as glm-5.2. Route engine waves through it — with opus calibration required (see Build packages step 4). | Solo shipping engine-semantics waves without an opus calibration pass — the calibration layer is load-bearing there, not a luxury |
+| **glm-5.3-flash** | `--provider zai --model glm-5.3-flash` (`--thinking high`) | Faster/cheaper glm-5.3 variant. n=2: 1 A on a clean-config well-fenced single-file CI wiring; 1 inconclusive on a hard implementation wave (config confound during the rep, verdict withdrawn). Usable as-is for well-fenced verifiable tasks; the engine-wave question stays open until the next clean-config wave rep. | Solo engine-semantics waves until further reps land |
+| **grok-build-0.1** | `--provider xai --model grok-build-0.1` | The mechanical-swarm lane: latency-sensitive small tasks and wide fan-outs of tiny packages — renames, scripted edits, lookups (100+ tok/s). Purpose-trained coding workhorse (SWE-bench Verified 70.8, successor to grok-code-fast). 256K ctx. **Still zero LOG.md rows after two retros** — not a routing miss, the shape hasn't arisen in the delegated batch (mostly judgment work). Reflex-route to it when a genuinely mechanical task does show up so we finally get reps. | Anything needing judgment |
 | **grok-4.3** | `--provider xai --model grok-4.3` | Fallback 1M-ctx reasoning model if glm-5.2 is rate-limited on a long-context task. | Generally superseded by grok-4.5 |
+| **deepseek-v4-flash-0731** | `pi-delegate -m deepseek/deepseek-v4-flash-0731` | **Reviewer role.** n=3: 2 A on small diffs (~400 lines M36a fixup ~4min; ~19min CI review), 1 F on a ~2,400-line wave diff — hung twice with zero output and near-zero CPU (an apparent size sensitivity, not the openrouter dead-request flake alone). Verification-grade skepticism on small diffs: file:line evidence, no hallucinated findings, clean nit-vs-defect separation. Default reviewer for external-lane fix-loop diffs **under ~500 lines** with periodic opus calibration; do not use as builder yet. | Big-diff reviews (>~500 lines: route to grok-4.5 or opus); building — not enough reps as author, and opus still owns spec/design review |
 
 Escalate back to **Claude subagents** (per CLAUDE.md routing) when the task holds open-ended judgment, needs conversation context, or must integrate with Agent-tool machinery (structured output schemas, worktree isolation, background notifications).
 
@@ -51,8 +54,19 @@ To make steps delegable in parallel rather than sequentially:
 
 ### TDD split: tests and implementation from different delegates
 
-Every B grade in the log shares one failure mode: the delegate's own green tests missed a real
-hole — the same mind wrote the code and the proof. For any package worth TDD, split it:
+External-lane B's now split into two classes, and the fix for one does not fix the other:
+
+- **Same-mind writes code AND proof** — the delegate's green tests missed a hole a different
+  seat would have caught. Historical rate is high; **the TDD split fixes this class** and has
+  zero reps logged despite being the highest-value unadopted routing change on the sheet. Do
+  it: for any package worth TDD, split it.
+- **Cross-surface reach the in-package tests can't see** (n=6/6 engine-semantics waves this
+  batch) — the code is right on its own surface but its interaction with an existing combinator,
+  decision layer, zone-reach law, or widened row inheriting old combinator lies fails. No test
+  the *builder* could have written on the touched files would have caught it. **The TDD split
+  does not help here** — only opus calibration does (Build packages step 4).
+
+TDD-split mechanics (unchanged; applies to the first class):
 
 1. **Delegate A** writes the failing test suite from the spec alone — blind to any
    implementation. Tests-as-contract.
@@ -71,7 +85,8 @@ pi-delegate -n ...                                    # dry-run: print the pi co
 
 `~/bin/pi-delegate` (chezmoi source `bin/executable_pi-delegate`) wraps the raw call so the two
 easy-to-forget flags can't be forgotten: `--thinking low` and re-adding the permission-gate
-extension that `-ne` strips. It also derives the provider from the model name, so `--provider`
+extension that `-ne` strips. It also derives the provider from the model name (`vendor/model` ids
+such as `openai/gpt-6-luna` go to OpenRouter), so `--provider`
 can't drift out of sync with `--model`. Reach for raw `pi` only for flags the wrapper doesn't
 expose — and if you need one twice, add it to the wrapper.
 
@@ -136,7 +151,9 @@ These models share none of your conversation context. Every delegation prompt ne
 2. **A self-verification step** — "run the tests / build / script and report PASS or FAIL with the output." GLM 5.2 in particular performs significantly better when told to execute and self-debug iteratively rather than one-shot.
 3. **Explicit wording** — for GLM, prompt phrasing moves results more than thinking level does. Say exactly what to check.
 
-4. **A deviations section** — end the brief with: "In your final report, list every place you deviated from this spec and why." Honest deviations are common and often right, but they can carry product decisions the user should hear about — read them before merging.
+4. **A deviations section** — end the brief with: "In your final report, list every place you deviated from this spec and why." Honest deviations are common and often right, but they can carry product decisions the user should hear about — read them before merging. Beyond product decisions, this clause has repeatedly surfaced *bugs in the surrounding code the brief pointed at* (ADR-vs-code mismatches, ambiguous CR readings, brief pins that can't discriminate the bug) — non-optional.
+
+5. **Concrete pointers to prior art** — when a brief is close to another that succeeded, name it: "check how scry is observed elsewhere in the resume loop." Cheap, and observed to close a specific gap class (a wave-battery brief went B → A on the next rep after adding one such pointer).
 
 Then **verify yourself**: treat the output as an untrusted contribution — diff-review the changes and run the project's full test/lint suite before accepting. Never report delegated work as done on the agent's say-so alone.
 
@@ -170,10 +187,20 @@ For delegations bigger than a one-shot (a feature, a rebuild, parallel packages)
      briefed without it shipped can't-fail or wrong-layer assertions (n=5). Also require
      **fix what you flag**: an issue the builder notices in its own output gets fixed or
      explicitly argued in the deviations report, never just mentioned.
+   - *For engine / new-primitive / wave briefs specifically*, three clauses have repeatedly
+     been the difference between escape and catch. Include them in the Spec section verbatim:
+     **(a) ADR table must sum to the claimed card/behavior delta** — force the arithmetic in
+     the ADR itself (n=5 waves with unsummed ADRs carried a mis-attribution the builder didn't
+     catch). **(b) Commit the new primitive/decision-kind FIRST**, before any grammar or test
+     edits — one stall run without this step-0 burned ~50min in a survey/compaction loop
+     before a step-ordered correction unstuck it; costs nothing to require. **(c) Name
+     "widened row × existing combinator" as an explicit review target** — a new row reaching
+     an old combinator inherits every lie the old combinator carries (probe-proven critical
+     escape once; the class is generic to any spec-combinator that gets a new input shape).
    - *Out of scope* + the deviations-report requirement.
 2. **Worktree per package.** Prefer worktrunk when available — always if the repo has a worktrunk config, generally whenever `wt` is installed: `wt switch --create <branch>` (its hooks make the worktree actually runnable — env files, deps), later `wt merge` and `wt remove` (deletes the branch once merged). Fallback: hand-create from the intended base with `git worktree add <dir> -b <branch> <base-sha>` — never a harness's automatic worktree feature with a defaulted base. If the feature branch advances before launch, `git -C <wt> reset --hard <new-sha>` (safe while the package branch has no commits). Never `git stash` in shared checkouts.
 3. **Battery on the merged result, not just the package's own gates.** Merge `--no-ff`, then run the wider suites the touched surfaces feed — path-scoped runs miss cross-cutting breakage.
-4. **Independent review — always.** Capture the diff (`git show <sha> > <scratchpad>/<slug>-diff.txt`) and launch a fresh-context **opus** review subagent (per CLAUDE.md routing) with: the diff path, changed-file list, domain rules, and focus hints *including your own suspicions and anything the builder's self-review dismissed*. Builder self-review raises the floor; it never substitutes for this.
+4. **Independent review — always. Opus for engine-semantics or new-primitive waves; deepseek acceptable for small fix-loop diffs.** Capture the diff (`git show <sha> > <scratchpad>/<slug>-diff.txt`) and launch a fresh-context **opus** review subagent (per CLAUDE.md routing) with: the diff path, changed-file list, domain rules, and focus hints *including your own suspicions and anything the builder's self-review dismissed*. Builder self-review and same-tier (grok-4.5) review both raise the floor; **neither substitutes for opus on engine-semantics work** — n=6/6 wave B's this batch had cross-surface seam escapes (widened-row-inherits-combinator-lies, zone-reach in ceremony, decision-offer scope over outer spec, copied-idiom from adjacent-but-different primitive) that only the opus pass surfaced. For small fix-loop diffs under ~500 lines, deepseek is the cheaper reviewer.
 5. **Fix pass, push, cleanup.** Confirmed findings go **back to the builder, not to your own editor** — pi: launch with `--session-id <uuid>` so the session exists to resume; grok: `grok-delegate -s <session-id>`. The builder holds the package context; hand-fixing burns Claude time re-deriving it and silently takes Claude out of the reviewer seat. Fix by hand only when the fix is smaller than the brief for it. Re-run the battery, push, then remove the worktree.
 6. If the target branch moved while the builder ran, expect conflicts in shared files — resolve keeping both intents, never discard either side blind.
 

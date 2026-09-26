@@ -21,6 +21,7 @@ session=""
 json_mode=0
 dry_run=0
 prompt=""
+report=""
 
 usage() {
 	cat <<'EOF'
@@ -29,16 +30,20 @@ Usage: pi-delegate [options] "<task>"
 
 Options:
   -m, --model <id>      grok-4.5 (default) | glm-5.2 | grok-build-0.1 | grok-4.3
+                        | any OpenRouter id, e.g. openai/gpt-6-luna
   -C, --dir <path>      working dir for the delegate (default: cwd). Use the repo
                         root so pi auto-loads its AGENTS.md / CLAUDE.md.
   -f, --file <path>     brief file; sends "Read and execute the brief at <abs>"
   -t, --thinking <lvl>  low (default) | medium | high   [high stalls — avoid]
   -s, --session <uuid>  reuse/create a pi session for follow-up turns
       --json            stream structured events (--mode json) instead of text
+  -o, --report <p>      tee the delegate's stdout (its final report) to this file
+                        (default $TMPDIR/pi-delegate-<pid>.report). The full
+                        report survives whatever the caller pipes stdout into.
   -n, --dry-run         print the pi command without running it
   -h, --help            show this
 
-Model -> provider is automatic (glm* -> zai, grok* -> xai).
+Model -> provider is automatic (vendor/model -> openrouter, glm* -> zai, grok* -> xai).
 
 Every brief should state a self-verification step ("run the tests and report
 PASS/FAIL with output") and ask for a deviations list. Always review the diff
@@ -72,6 +77,10 @@ while [[ $# -gt 0 ]]; do
 		json_mode=1
 		shift
 		;;
+	-o | --report)
+		report="${2:?--report needs a value}"
+		shift 2
+		;;
 	-n | --dry-run)
 		dry_run=1
 		shift
@@ -93,10 +102,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$model" in
+*/*) provider="openrouter" ;;
 glm*) provider="zai" ;;
 grok*) provider="xai" ;;
 *)
-	echo "pi-delegate: cannot infer provider for model '$model' (expected glm* or grok*)" >&2
+	echo "pi-delegate: cannot infer provider for model '$model' (expected vendor/model, glm* or grok*)" >&2
 	exit 2
 	;;
 esac
@@ -146,4 +156,13 @@ if ((dry_run)); then
 fi
 
 cd "$workdir"
+
+# Every byte the delegate prints also lands in the report file, so a truncated or
+# piped stdout on the caller's side (a `tail`, a full buffer) can never lose the
+# report — that has cost two review rounds.
+: "${report:=${TMPDIR:-/tmp}/pi-delegate-$$.report}"
+: >"$report"
+exec > >(tee -a "$report")
+echo "pi-delegate: report -> $report  (full stdout, survives caller-side truncation)" >&2
+
 exec pi "${args[@]}" "$prompt"

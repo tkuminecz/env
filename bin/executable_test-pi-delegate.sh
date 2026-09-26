@@ -269,6 +269,43 @@ else
 		"status=$run_status stdout='$run_stdout'"
 fi
 
+# --- 14. vendor/model ids route to openrouter ---
+# OpenRouter model ids are always "<vendor>/<model>", so the slash is what marks
+# them; the id must reach pi unchanged because OpenRouter needs the vendor prefix.
+run_pd -n -m openai/gpt-6-luna "do a thing"
+luna_ok=0
+if [[ $run_status -eq 0 ]] &&
+	assert_contains "$run_stdout" "--provider openrouter" &&
+	assert_contains "$run_stdout" "--model openai/gpt-6-luna"; then
+	luna_ok=1
+fi
+run_pd -n -m deepseek/deepseek-v4-flash-0731 "do a thing"
+ds_ok=0
+if [[ $run_status -eq 0 ]] &&
+	assert_contains "$run_stdout" "--provider openrouter" &&
+	assert_contains "$run_stdout" "--model deepseek/deepseek-v4-flash-0731"; then
+	ds_ok=1
+fi
+if [[ $luna_ok -eq 1 && $ds_ok -eq 1 ]]; then
+	pass "14 vendor/model ids route to openrouter with the id unchanged"
+else
+	fail "14 vendor/model ids route to openrouter with the id unchanged" \
+		"luna_ok=$luna_ok ds_ok=$ds_ok stdout='$run_stdout' stderr='$run_stderr'"
+fi
+
+# --- 15. a z.ai model id with a vendor prefix still goes to openrouter, not zai ---
+# glm models are also sold on OpenRouter as "z-ai/glm-*"; the prefix means the
+# caller chose OpenRouter billing, so the glm* rule must not capture it.
+run_pd -n -m z-ai/glm-5.3 "do a thing"
+if [[ $run_status -eq 0 ]] &&
+	assert_contains "$run_stdout" "--provider openrouter" &&
+	assert_not_contains "$run_stdout" "--provider zai"; then
+	pass "15 z-ai/glm-* routes to openrouter, not zai"
+else
+	fail "15 z-ai/glm-* routes to openrouter, not zai" \
+		"status=$run_status stdout='$run_stdout' stderr='$run_stderr'"
+fi
+
 echo
 echo "Results: $pass_count passed, $fail_count failed"
 if [[ $fail_count -gt 0 ]]; then
