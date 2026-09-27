@@ -21,13 +21,6 @@
       "check": "sql-drop",
       "description": "Dropping a table, database or schema",
       "severity": "warn"
-    },
-    {
-      "name": "env-secrets",
-      "tool": "Bash",
-      "check": "secret-env-read",
-      "description": "Reading .env files that may contain secrets",
-      "severity": "warn"
     }
   ]
 }

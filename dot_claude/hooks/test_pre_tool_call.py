@@ -244,63 +244,6 @@ class RecursiveRmDangerTest(unittest.TestCase):
         self.assertIsNone(self.danger('rm -rf "unterminated'))
 
 
-class SecretEnvReadTest(unittest.TestCase):
-    """The .env check only asks when a real .env file would be printed."""
-
-    def read(self, command):
-        return pre_tool_call.secret_env_read(
-            command, "/home/u/projects/app", home="/home/u", env={}
-        )
-
-    def test_flags_printing_a_real_env_file(self):
-        # Each of these puts secret values into the transcript.
-        for cmd in (
-            "cat .env",
-            "cat apps/web/.env.local",
-            "head -5 .env.production",
-            "cat deploy/prod.env",
-            "sudo cat /etc/app/.env",
-            "bash -c 'cat .env'",
-            "cat package.json; cat .env",
-        ):
-            with self.subTest(cmd=cmd):
-                self.assertIsNotNone(self.read(cmd), cmd)
-
-    def test_ignores_templates(self):
-        # .env.example and friends are committed and hold no secrets.
-        for cmd in ("cat .env.example", "cat .env.sample", "cat .env.dist"):
-            with self.subTest(cmd=cmd):
-                self.assertIsNone(self.read(cmd), cmd)
-
-    def test_ignores_writes_to_env(self):
-        # Writing or copying a .env file prints nothing from it.
-        for cmd in (
-            "cat > .env <<'EOF'\nAPI_KEY=abc\nEOF",
-            "cat .env.example > .env",
-            "cp .env.example .env",
-            "echo KEY=1 >> .env",
-        ):
-            with self.subTest(cmd=cmd):
-                self.assertIsNone(self.read(cmd), cmd)
-
-    def test_ignores_env_mentioned_in_code_or_patterns(self):
-        # process.env in code, a heredoc body or a grep pattern is not a
-        # file read; the old regex fired on all of these.
-        for cmd in (
-            "python3 - <<'PYEOF'\ns = 'cat ' + process.env.FOO\nPYEOF",
-            "cat src/config.ts | grep process.env",
-            'grep -rn "import.meta.env" src/',
-            'grep -n ".env" README.md',
-        ):
-            with self.subTest(cmd=cmd):
-                self.assertIsNone(self.read(cmd), cmd)
-
-    def test_grep_on_env_is_left_alone(self):
-        # grep on a .env is almost always a one-key lookup (PORT, a URL);
-        # replaying past sessions showed asking on it would 4x the prompts.
-        self.assertIsNone(self.read("grep -n PORT dev.env"))
-
-
 class SqlDropTest(unittest.TestCase):
     """The DROP check only asks when a database client would run the drop."""
 
@@ -451,12 +394,10 @@ class HookEndToEndTest(unittest.TestCase):
         # other command.
         self.assertIsNone(self.run_hook("rm -rf /tmp/some-scratch/out"))
 
-    def test_env_template_is_quiet_but_real_env_asks(self):
-        # The shipped rules.json wires the .env check: templates pass, a
-        # real .env read still asks.
-        self.assertIsNone(self.run_hook("cat .env.example"))
-        out = self.run_hook("cat .env")["hookSpecificOutput"]
-        self.assertEqual(out["permissionDecision"], "ask")
+    def test_env_reads_are_not_guarded(self):
+        # Reading .env files is deliberately allowed: the guard prompted far
+        # more often than it helped, so there is no .env rule at all.
+        self.assertIsNone(self.run_hook("cat .env"))
 
     def test_drop_in_docs_is_quiet_but_drop_via_psql_asks(self):
         # The shipped rules.json wires the DROP check: a grep for DROP TABLE

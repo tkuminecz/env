@@ -406,45 +406,6 @@ def _new_walker(home: str | None, env: dict | None) -> _ShellWalker:
     return _ShellWalker(os.path.normpath(home or os.path.expanduser("~")), env)
 
 
-# Commands that print whole files. grep is left out on purpose: on .env
-# files it is nearly always a one-key lookup like `grep PORT .env`, and
-# asking on those would bring back the noise this check exists to remove.
-_FILE_PRINTERS = {"cat", "head", "tail", "less", "more", "bat", "batcat", "tac", "nl"}
-_ENV_TEMPLATE = re.compile(r"example|sample|template|\.dist$", re.IGNORECASE)
-
-
-def _is_secret_env_file(path: str) -> bool:
-    """.env, .env.local, prod.env and the like; not .env.example."""
-    name = os.path.basename(path.rstrip("/"))
-    if _ENV_TEMPLATE.search(name):
-        return False
-    return name == ".env" or name.startswith(".env.") or name.endswith(".env")
-
-
-def secret_env_read(
-    command: str,
-    cwd: str | None,
-    *,
-    home: str | None = None,
-    env: dict | None = None,
-) -> str | None:
-    """Return why `command` prints a .env file that may hold secrets, or None.
-
-    Only a real read counts: `cat .env`, `head .env.local`. Templates
-    like .env.example, writes like `cat > .env`, and `.env` mentioned in
-    code or quoted text are fine.
-    """
-    walker = _new_walker(home, env)
-    for name, args, _ in walker.commands(command, cwd):
-        if name not in _FILE_PRINTERS:
-            continue
-        for arg in (a for a in args if not a.startswith("-")):
-            path = walker.expand(arg)
-            if path and _is_secret_env_file(path):
-                return f"`{name} {arg}` would print a .env file that may hold secrets."
-    return None
-
-
 # Database clients that run the SQL they are given.
 _SQL_CLIENTS = {
     "psql",
@@ -530,7 +491,6 @@ def git_force_push(
 
 CHECKS = {
     "recursive-rm": recursive_rm_danger,
-    "secret-env-read": secret_env_read,
     "sql-drop": sql_drop,
     "git-force-push": git_force_push,
 }
