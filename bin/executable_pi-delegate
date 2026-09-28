@@ -5,9 +5,10 @@
 #   --thinking low  — pi's saved default is `high`, which stalls for minutes
 #   -e <gate>       — `-ne` (needed to skip ~15s of MCP discovery) also strips
 #                     the pi-kit permission-gate extension; this re-adds it
-#   hangs           — pi can hang indefinitely with zero work landed (observed on
-#                     both session-resume and fresh one-shots; the calling harness
-#                     still reports it "running"). Four such runs burned ~25h.
+#   hangs           — pi can hang indefinitely (observed on both session-resume
+#                     and fresh one-shots; the calling harness still reports it
+#                     "running"). Four such runs burned ~25h. Killed runs often
+#                     leave salvageable edits — check the tree before relaunching.
 # The provider is derived from the model name so the two can never drift apart.
 #
 # Hang detection is CPU-based, not duration-based. Every hung run observed sat in
@@ -68,6 +69,10 @@ Options:
       --json            stream structured events (--mode json) instead of text
   -n, --dry-run         print the pi command without running it
   -h, --help            show this
+
+Exit codes: 0 ok; 1 empty report on success status; 2 usage/config error;
+3 provider refused (402/429 / credit / rate-limit); 124 timeout cap; 125 stall.
+Other codes pass through from pi.
 
 Check the heartbeat file whenever you want — `tail -3` tells you in one second
 whether a run is alive, so there is never a reason to sit and wonder.
@@ -221,11 +226,48 @@ cd "$workdir"
 # report — that has cost two review rounds.
 : "${report:=${TMPDIR:-/tmp}/pi-delegate-$$.report}"
 : >"$report"
-exec > >(tee -a "$report")
+: >"$report.stderr"
 echo "pi-delegate: report -> $report  (full stdout, survives caller-side truncation)" >&2
 
-# No watchdog wanted: hand the process straight over.
+# Append a failure trailer to stdout and the report; detect provider refusal.
+_pi_finish() {
+	local status="$1"
+	if [[ $status -eq 0 && -s "$report" ]]; then
+		exit 0
+	fi
+	{
+		echo
+		echo "---- pi-delegate: pi exited ${status}; the report above may be partial or empty. Last stderr lines:"
+		tail -n 20 "$report.stderr"
+	} | tee -a "$report"
+	if grep -qiE '(status|http|code|error)[^0-9]{0,15}(402|429)|payment required|balance exhausted|too many requests|rate[ _-]?limit|quota' "$report.stderr"; then
+		local other
+		case "$provider" in
+		xai) other="pi-delegate -m glm-5.2" ;;
+		zai) other="grok-delegate" ;;
+		*) other="the other subscription" ;;
+		esac
+		echo "pi-delegate: PROVIDER REFUSED (${provider}) — out of credit or rate-limited. A 402 is an outage for the rest of the day: salvage the tree (git status, git diff, re-run the package's gates) and reroute to ${other}. A 429 may clear on one relaunch." >&2
+		exit 3
+	fi
+	if [[ $status -eq 0 ]]; then
+		exit 1
+	fi
+	exit "$status"
+}
+
+_pi_kill_trailer() {
+	local kind="$1"
+	{
+		echo
+		echo "---- pi-delegate: killed (${kind}); the report above may be partial or empty. Last stderr lines:"
+		tail -n 20 "$report.stderr"
+	} | tee -a "$report"
+}
+
+# No watchdog wanted: hand the process straight over (stdout still teed).
 if ((timeout_mins == 0 && stall_mins == 0)); then
+	exec > >(tee -a "$report")
 	exec pi "${args[@]}" "$prompt" </dev/null
 fi
 
@@ -237,10 +279,29 @@ tree_stat() {
 		awk -v g="$1" '$1 == g { cpu += $2; n++ } END { print cpu + 0, n + 0 }'
 }
 
+# The tees get their own fds so their pids are known. A bare `wait` skips process
+# substitutions, and judging the run before the report tee drained turned a
+# successful run into "empty report, exit 1". The drain is bounded because a
+# grandchild still holding the pipe must not hang the wrapper.
+exec {out_fd}> >(tee -a "$report")
+out_tee=$!
+exec {err_fd}> >(tee -a "$report.stderr" >&2)
+err_tee=$!
+drain_tees() {
+	exec {out_fd}>&- {err_fd}>&-
+	local p
+	for p in "$out_tee" "$err_tee"; do
+		for _ in $(seq 50); do
+			kill -0 "$p" 2>/dev/null || break
+			sleep 0.1
+		done
+	done
+}
+
 # Own process group, so one kill reaches the delegate and every child it spawned.
 # stdin from /dev/null: a background process group reading the tty gets SIGTTIN.
 set -m
-pi "${args[@]}" "$prompt" </dev/null &
+pi "${args[@]}" "$prompt" </dev/null >&"$out_fd" 2>&"$err_fd" {out_fd}>&- {err_fd}>&- &
 pid=$!
 set +m
 pgid=$pid
@@ -298,18 +359,21 @@ if [[ -n "$verdict" ]]; then
 	set +e
 	wait "$pid" 2>/dev/null
 	set -e
+	drain_tees
 
 	if [[ "$verdict" == "stall" ]]; then
 		echo "KILLED: stalled — zero cpu across the whole process tree for ${stall_mins}m" >>"$heartbeat"
+		_pi_kill_trailer "stalled"
 		echo "pi-delegate: HUNG and killed — the entire process tree burned zero cpu for ${stall_mins}m." >&2
-		echo "pi-delegate:   Assume ZERO work landed; observed hangs never recovered on their own." >&2
-		echo "pi-delegate:   Check the repo for partial edits, then relaunch as a FRESH one-shot" >&2
-		echo "pi-delegate:   (not a session resume) or do the work in-house." >&2
+		echo "pi-delegate:   Partial work may have landed. Salvage first: git status and git diff the tree," >&2
+		echo "pi-delegate:   check the code under any comment that claims behaviour, run the package's own" >&2
+		echo "pi-delegate:   gates, then relaunch (a FRESH one-shot, never a session resume) only for what is missing." >&2
 		tail -3 "$heartbeat" >&2
 		exit 125
 	fi
 
 	echo "KILLED: hit the ${timeout_mins}m cap while still burning cpu" >>"$heartbeat"
+	_pi_kill_trailer "hit the ${timeout_mins}m cap"
 	echo "pi-delegate: hit the ${timeout_mins}m cap and was killed. It was still burning cpu," >&2
 	echo "pi-delegate:   so this is a slow/runaway run, not the usual hang — check for partial" >&2
 	echo "pi-delegate:   work before relaunching, and raise -T if the package is genuinely big." >&2
@@ -321,6 +385,7 @@ set +e
 wait "$pid"
 status=$?
 set -e
+drain_tees
 
 # last_cpu is the final sample; the tree is already gone by now, so re-reading it
 # would always report 0. -1 means the run finished before the first sample.
@@ -328,4 +393,4 @@ if ((last_cpu < 0)); then last_seen="unsampled"; else last_seen="${last_cpu}s"; 
 printf 'EXIT %d after %ds (last sampled tree_cpu=%s)\n' \
 	"$status" "$((SECONDS - start))" "$last_seen" >>"$heartbeat"
 
-exit "$status"
+_pi_finish "$status"

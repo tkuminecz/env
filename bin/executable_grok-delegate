@@ -40,6 +40,7 @@ sandbox_explicit=0
 worktree=""
 worktree_ref=""
 default_denies=1
+read_only=0
 dry_run=0
 prompt=""
 report=""
@@ -79,12 +80,20 @@ Options:
       --deny <rule>       extra permission deny rule (repeatable)
       --no-default-denies drop the baked deny rules (sudo, rm -rf, chmod 777,
                           git push) — say why in the session notes
+      --read-only         path-scoped Edit/Write denies on the workdir (and git
+                          roots) plus denies for git add/commit/stash/checkout/
+                          restore/reset/clean — keeps shell redirects and /tmp
+                          usable. Prefer this over a bare --deny Edit/Write.
       --worktree [<name>] grok-managed worktree — requires an explicit
                           --worktree-ref (its default base is a footgun, and it
                           skips wt hooks; prefer `wt switch --create` + -C)
       --worktree-ref <r>  base ref for --worktree
   -n, --dry-run           print the grok command without running it
   -h, --help              show this
+
+Exit codes: 0 ok; 1 empty report on success status; 2 usage/config error;
+3 provider refused (402/429 / credit / rate-limit). Other codes pass through
+from grok.
 
 Every brief should state a self-verification step ("run the tests and report
 PASS/FAIL with output") and ask for a deviations list. Always review the diff
@@ -132,11 +141,22 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	--deny)
-		extra_rules+=(--deny "${2:?--deny needs a rule}")
+		_deny_rule="${2:?--deny needs a rule}"
+		# Bare Edit/Write also blocks every shell redirect and /tmp file writes.
+		if [[ "$_deny_rule" =~ ^(Edit|Write)(\((\*|\*\*|/\*\*)\))?$ ]]; then
+			echo "grok-delegate: a bare Edit/Write deny also blocks every shell redirect (even 2>/dev/null) and file writes in /tmp — use --read-only, or deny Edit(<abs-path>/**) explicitly" >&2
+			exit 2
+		fi
+		extra_rules+=(--deny "$_deny_rule")
+		unset _deny_rule
 		shift 2
 		;;
 	--no-default-denies)
 		default_denies=0
+		shift
+		;;
+	--read-only)
+		read_only=1
 		shift
 		;;
 	--worktree)
@@ -228,6 +248,43 @@ args=(
 ((default_denies)) && args+=("${DEFAULT_DENIES[@]}")
 [[ ${#extra_rules[@]} -gt 0 ]] && args+=("${extra_rules[@]}")
 
+# Path-scoped Edit/Write: a bare Edit/Write deny gates every shell redirect
+# (including 2>/dev/null) and the file tool in /tmp. Verified 2026-09-28.
+if ((read_only)); then
+	_ro_dirs=()
+	_ro_add() {
+		local d="$1" existing
+		[[ -n "$d" ]] || return 0
+		for existing in "${_ro_dirs[@]+"${_ro_dirs[@]}"}"; do
+			[[ "$existing" == "$d" ]] && return 0
+		done
+		_ro_dirs+=("$d")
+	}
+	_ro_add "$(cd "$workdir" && pwd -P)"
+	if git -C "$workdir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+		_ro_add "$(git -C "$workdir" rev-parse --show-toplevel)"
+		_ro_common="$(git -C "$workdir" rev-parse --path-format=absolute --git-common-dir)"
+		if [[ "$(basename "$_ro_common")" == ".git" ]]; then
+			_ro_add "$(dirname "$_ro_common")"
+		fi
+		unset _ro_common
+	fi
+	for _ro_p in "${_ro_dirs[@]}"; do
+		args+=(--deny "Edit(${_ro_p}/**)" --deny "Write(${_ro_p}/**)")
+	done
+	args+=(
+		--deny "Bash(git add*)"
+		--deny "Bash(git commit*)"
+		--deny "Bash(git stash*)"
+		--deny "Bash(git checkout*)"
+		--deny "Bash(git restore*)"
+		--deny "Bash(git reset*)"
+		--deny "Bash(git clean*)"
+	)
+	unset _ro_dirs _ro_p
+	unset -f _ro_add
+fi
+
 if [[ -n "$json_schema" ]]; then
 	args+=(--json-schema "$json_schema")
 fi
@@ -271,7 +328,43 @@ fi
 # stdout on the caller's side (a `tail`, a full buffer) can never lose the report.
 : "${report:=${TMPDIR:-/tmp}/grok-delegate-$$.report}"
 : >"$report"
+: >"$report.stderr"
 echo "grok-delegate: report -> $report  (full stdout, survives caller-side truncation)" >&2
 
 cd "$workdir"
-exec grok "${args[@]}" > >(tee -a "$report")
+# The stderr tee gets its own fd so its pid is known. Written inside the pipeline, it
+# ran in the pipeline's subshell, where the parent's `wait` can't reach it, and a 402
+# printed just before exit could still be in the pipe when the check below read the
+# file. The drain is bounded because a grandchild still holding the pipe must not
+# hang the wrapper. The report tee is a pipeline member, so the shell waits for it.
+exec {err_fd}> >(tee -a "$report.stderr" >&2)
+err_tee=$!
+set +e
+grok "${args[@]}" 2>&"$err_fd" {err_fd}>&- | tee -a "$report"
+status=${PIPESTATUS[0]}
+set -e
+exec {err_fd}>&-
+for _ in $(seq 50); do
+	kill -0 "$err_tee" 2>/dev/null || break
+	sleep 0.1
+done
+
+if [[ $status -eq 0 && -s "$report" ]]; then
+	exit 0
+fi
+
+{
+	echo
+	echo "---- grok-delegate: grok exited ${status}; the report above may be partial or empty. Last stderr lines:"
+	tail -n 20 "$report.stderr"
+} | tee -a "$report"
+
+if grep -qiE '(status|http|code|error)[^0-9]{0,15}(402|429)|payment required|balance exhausted|too many requests|rate[ _-]?limit|quota' "$report.stderr"; then
+	echo "grok-delegate: PROVIDER REFUSED (x.ai) — out of credit or rate-limited. A 402 is an outage for the rest of the day: salvage the tree (git status, git diff, re-run the package's gates) and reroute to glm (pi-delegate -m glm-5.2). A 429 may clear on one relaunch." >&2
+	exit 3
+fi
+
+if [[ $status -eq 0 ]]; then
+	exit 1
+fi
+exit "$status"

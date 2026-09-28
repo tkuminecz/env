@@ -87,10 +87,12 @@ default — decompose for width first, not a sequential plan with a couple of de
 - mechanical refactors, renames, signature changes across files
 - boilerplate scaffolding — new service file sets, charts, config plumbing
 - "make this lint / typecheck / format clean"
-- doc and comment sweeps
+- doc and comment sweeps (then read every rewritten comment against the code, since clarity
+  rewrites have introduced false claims)
 - any fan-out of similar independent chunks
-- final read-only merge-readiness reviews of a big diff → the 4-model panel (grok CLI + glm +
-  deepseek + one opus Agent as reference; `delegate` skill "Read-only review panels")
+- final read-only merge-readiness reviews of a big diff → the 4-model panel (grok CLI with
+  `--read-only` + glm + deepseek + one opus Agent as reference; `delegate` skill "Read-only
+  review panels")
 
 **Don't delegate**:
 
@@ -110,13 +112,14 @@ default — decompose for width first, not a sequential plan with a couple of de
 Two wrappers on PATH, both dry-runnable with `-n`, never hand-composed flags: **`grok-delegate`**
 for unattended grok-4.5 package builds via the grok CLI — **now the primary and best-graded
 lane** (bakes in kernel sandbox with an auto-downgrade where the host denies user namespaces,
-deny rules, `--max-turns 80`, schema-constrained reports; the sub exposes only grok-4.5 there) —
+deny rules, `--max-turns 80`, `--read-only` for review lanes, exit 3 when x.ai refuses for
+credit, schema-constrained reports; the sub exposes only grok-4.5 there) —
 and **`pi-delegate`** for everything else — GLM models, **grok-build-0.1** (the mechanical-swarm
 lane: keep its packages genuinely tiny; its edits land but its *report phase* is where it dies,
 so re-run every gate it claims and expect to salvage), quick one-shots, and fix loops. It bakes in the mandatory
 `--thinking low`, re-adds the permission-gate extension that `-ne` strips, derives the provider
 from the model name, and **watchdogs the run by CPU**: the delegate gets its own process group,
-tree-CPU is sampled every 20s to a heartbeat file, and a tree burning zero CPU for 3min is killed
+tree-CPU is sampled every 20s to a heartbeat file, and a tree burning zero CPU for 6min is killed
 as hung (exit 125; 60min backstop cap = 124). `tail -3 <heartbeat>` answers "is it alive?" in a
 second — check it early rather than waiting on a notification that never comes for a hang. Load
 the `delegate` skill for

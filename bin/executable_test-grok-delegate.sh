@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-contained test suite for ~/bin/grok-delegate (dry-run only).
+# Self-contained test suite for grok-delegate (dry-run + fake-binary real mode).
 set -u
 
 GROK_DELEGATE="${GROK_DELEGATE:-$HOME/bin/grok-delegate}"
@@ -54,7 +54,42 @@ assert_not_contains() {
 	esac
 }
 
+# Install a fake grok on PATH whose behaviour is selected by FAKE_GROK_MODE.
+install_fake_grok() {
+	local fake_bin="$SCRATCHPAD/fakebin-grok"
+	mkdir -p "$fake_bin"
+	cat >"$fake_bin/grok" <<'FAKE'
+#!/usr/bin/env bash
+case "${FAKE_GROK_MODE:-ok}" in
+ok)
+	printf 'final report\n'
+	exit 0
+	;;
+credit)
+	echo 'Error: Internal error: {"message": "API error (status 402 Payment Required): Grok Build usage balance exhausted", "http_status": 402}' >&2
+	exit 1
+	;;
+crash)
+	echo 'boom' >&2
+	exit 7
+	;;
+empty)
+	exit 0
+	;;
+*)
+	echo "fake grok: unknown FAKE_GROK_MODE=${FAKE_GROK_MODE}" >&2
+	exit 99
+	;;
+esac
+FAKE
+	chmod +x "$fake_bin/grok"
+	export PATH="$fake_bin:$PATH"
+}
+
 # --- 1. Default invocation emits core flags ---
+# Default max-turns is 80 (raised from 40 so verification/mutation proofs survive).
+# Sandbox profile may be auto-downgraded to off when user namespaces are denied;
+# assert the flag is present and leave the profile value to test 16.
 run_gd -n "do a thing"
 if [[ $run_status -eq 0 ]] &&
 	assert_contains "$run_stdout" "--model" &&
@@ -62,8 +97,7 @@ if [[ $run_status -eq 0 ]] &&
 	assert_contains "$run_stdout" "--permission-mode" &&
 	assert_contains "$run_stdout" "bypassPermissions" &&
 	assert_contains "$run_stdout" "--sandbox" &&
-	assert_contains "$run_stdout" "workspace" &&
-	assert_contains "$run_stdout" " --max-turns 40 " &&
+	assert_contains "$run_stdout" " --max-turns 80 " &&
 	assert_contains "$run_stdout" "--output-format" &&
 	assert_contains "$run_stdout" "plain" &&
 	assert_contains "$run_stdout" "--no-auto-update"; then
@@ -314,18 +348,20 @@ else
 fi
 
 # --- 16. -T and --sandbox overrides replace defaults ---
+# --sandbox off skips the user-namespace probe (strict exits 2 on this host).
+# Negative check uses the current default of 80, not the old 40.
 run_gd -n -T 5 "do a thing"
 turns_ok=0
 if [[ $run_status -eq 0 ]] &&
 	assert_contains "$run_stdout" " --max-turns 5 " &&
-	assert_not_contains "$run_stdout" " --max-turns 40 "; then
+	assert_not_contains "$run_stdout" " --max-turns 80 "; then
 	turns_ok=1
 fi
-run_gd -n --sandbox strict "do a thing"
+run_gd -n --sandbox off "do a thing"
 sandbox_ok=0
 if [[ $run_status -eq 0 ]] &&
 	assert_contains "$run_stdout" "--sandbox" &&
-	assert_contains "$run_stdout" "strict" &&
+	assert_contains "$run_stdout" "off" &&
 	assert_not_contains "$run_stdout" "--sandbox workspace"; then
 	sandbox_ok=1
 fi
@@ -333,7 +369,7 @@ if [[ $turns_ok -eq 1 && $sandbox_ok -eq 1 ]]; then
 	pass "16 -T and --sandbox overrides replace defaults"
 else
 	fail "16 -T and --sandbox overrides replace defaults" \
-		"turns_ok=$turns_ok sandbox_ok=$sandbox_ok"
+		"turns_ok=$turns_ok sandbox_ok=$sandbox_ok status=$run_status stdout=$run_stdout stderr=$run_stderr"
 fi
 
 # --- 17. Dry-run stdout starts with cd and contains && grok ---
@@ -345,6 +381,138 @@ if [[ $run_status -eq 0 ]] &&
 else
 	fail "17 dry-run stdout starts with cd and contains && grok" \
 		"status=$run_status stdout=$run_stdout"
+fi
+
+# --- 18. --read-only adds path-scoped Edit/Write + git mutation denies ---
+# Bare Edit/Write would also gate shell redirects and /tmp; path-scoped rules
+# keep those usable. Dry-run %q turns Edit(/path/**) into Edit\(/path/\*\*) —
+# match fragments that survive quoting.
+ro_dir="$(mktemp -d "$SCRATCHPAD/ro-XXXXXX")"
+git -C "$ro_dir" init -q
+ro_phys="$(cd "$ro_dir" && pwd -P)"
+run_gd -n --dir "$ro_dir" --read-only "do a thing"
+# The dry-run is %q-quoted by the wrapper itself, so eval rebuilds the exact argv and
+# each rule can be checked as a whole `--deny <rule>` pair, not as a loose substring.
+eval "ro_argv=(${run_stdout#*&& grok })"
+has_deny() {
+	local i
+	for ((i = 0; i + 1 < ${#ro_argv[@]}; i++)); do
+		[[ "${ro_argv[i]}" == --deny && "${ro_argv[i + 1]}" == "$1" ]] && return 0
+	done
+	return 1
+}
+if [[ $run_status -eq 0 ]] &&
+	has_deny "Edit(${ro_phys}/**)" &&
+	has_deny "Write(${ro_phys}/**)" &&
+	has_deny "Bash(git add*)" &&
+	has_deny "Bash(git commit*)" &&
+	has_deny "Bash(git checkout*)" &&
+	! has_deny "Edit" && ! has_deny "Write"; then
+	pass "18 --read-only emits path-scoped Edit/Write and git denies"
+else
+	fail "18 --read-only emits path-scoped Edit/Write and git denies" \
+		"status=$run_status stdout=$run_stdout phys=$ro_phys"
+fi
+
+# --- 19. Bare Edit/Write denies are rejected; path-scoped Edit stays accepted ---
+# A bare deny also blocks 2>/dev/null and /tmp writes — force --read-only instead.
+bare_edit_ok=0
+run_gd -n --deny Edit "do a thing"
+if [[ $run_status -eq 2 ]] && assert_contains "$run_stderr" "--read-only"; then
+	bare_edit_ok=1
+fi
+bare_write_ok=0
+run_gd -n --deny "Write(**)" "do a thing"
+if [[ $run_status -eq 2 ]] && assert_contains "$run_stderr" "--read-only"; then
+	bare_write_ok=1
+fi
+scoped_ok=0
+run_gd -n --deny "Edit(/some/dir/**)" "do a thing"
+if [[ $run_status -eq 0 ]]; then
+	scoped_ok=1
+fi
+if [[ $bare_edit_ok -eq 1 && $bare_write_ok -eq 1 && $scoped_ok -eq 1 ]]; then
+	pass "19 bare Edit/Write denies exit 2; path-scoped Edit accepted"
+else
+	fail "19 bare Edit/Write denies exit 2; path-scoped Edit accepted" \
+		"bare_edit_ok=$bare_edit_ok bare_write_ok=$bare_write_ok scoped_ok=$scoped_ok"
+fi
+
+# --- 20–23. Real mode via fake grok: ok / credit / crash / empty ---
+# Never invoke the real grok binary; PATH puts the fake first. --sandbox off
+# skips the namespace probe so the host's bwrap denial cannot exit 2.
+install_fake_grok
+
+# 20. ok: exit 0, report byte-identical to grok stdout (no trailer).
+rep20="$SCRATCHPAD/r20.report"
+FAKE_GROK_MODE=ok run_gd --sandbox off -o "$rep20" "do a thing"
+printf 'final report\n' >"$SCRATCHPAD/expected20"
+if [[ $run_status -eq 0 ]] && cmp -s "$rep20" "$SCRATCHPAD/expected20"; then
+	pass "20 real-mode ok: exit 0, report byte-identical"
+else
+	fail "20 real-mode ok: exit 0, report byte-identical" \
+		"status=$run_status report='$(cat "$rep20" 2>/dev/null || true)'"
+fi
+
+# 21. credit (402): exit 3, PROVIDER REFUSED on stderr, trailer has status + 402.
+rep21="$SCRATCHPAD/r21.report"
+FAKE_GROK_MODE=credit run_gd --sandbox off -o "$rep21" "do a thing"
+if [[ $run_status -eq 3 ]] &&
+	assert_contains "$run_stderr" "PROVIDER REFUSED" &&
+	assert_contains "$(cat "$rep21")" "grok exited 1" &&
+	assert_contains "$(cat "$rep21")" "status 402"; then
+	pass "21 real-mode credit: exit 3, PROVIDER REFUSED, trailer has 402"
+else
+	fail "21 real-mode credit: exit 3, PROVIDER REFUSED, trailer has 402" \
+		"status=$run_status stderr='$run_stderr' report='$(cat "$rep21" 2>/dev/null || true)'"
+fi
+
+# 22. crash: exit 7, trailer has boom, no PROVIDER REFUSED.
+rep22="$SCRATCHPAD/r22.report"
+FAKE_GROK_MODE=crash run_gd --sandbox off -o "$rep22" "do a thing"
+if [[ $run_status -eq 7 ]] &&
+	assert_contains "$(cat "$rep22")" "grok exited 7" &&
+	assert_contains "$(cat "$rep22")" "boom" &&
+	assert_not_contains "$run_stderr" "PROVIDER REFUSED"; then
+	pass "22 real-mode crash: exit 7, trailer has boom, no refusal"
+else
+	fail "22 real-mode crash: exit 7, trailer has boom, no refusal" \
+		"status=$run_status stderr='$run_stderr' report='$(cat "$rep22" 2>/dev/null || true)'"
+fi
+
+# 23. empty success: exit 1, trailer notes grok exited 0.
+rep23="$SCRATCHPAD/r23.report"
+FAKE_GROK_MODE=empty run_gd --sandbox off -o "$rep23" "do a thing"
+if [[ $run_status -eq 1 ]] &&
+	assert_contains "$(cat "$rep23")" "grok exited 0"; then
+	pass "23 real-mode empty: exit 1, trailer has grok exited 0"
+else
+	fail "23 real-mode empty: exit 1, trailer has grok exited 0" \
+		"status=$run_status report='$(cat "$rep23" 2>/dev/null || true)'"
+fi
+
+# --- 24. The wrapper waits for its tees to drain before judging the run ---
+# The 402 lands on stderr just before grok exits. If the wrapper grepped the stderr
+# copy before its tee drained, a credit outage would pass through as a plain exit 1
+# with an empty trailer (pi-delegate had exactly that race on its report tee). Only
+# the stderr copy is slowed: the report tee is a pipeline member the shell already
+# waits for, and slowing it too would hide a missing wait on the stderr tee.
+real_tee="$(command -v tee)"
+slow_bin="$SCRATCHPAD/slowtee"
+mkdir -p "$slow_bin"
+printf '#!/usr/bin/env bash\ncase "$*" in *.stderr) sleep 1.5 ;; esac\nexec %q "$@"\n' "$real_tee" >"$slow_bin/tee"
+chmod +x "$slow_bin/tee"
+rep24="$SCRATCHPAD/r24.report"
+rep24b="$SCRATCHPAD/r24b.report"
+PATH="$slow_bin:$PATH" FAKE_GROK_MODE=ok run_gd --sandbox off -o "$rep24" "do a thing"
+status24=$run_status
+PATH="$slow_bin:$PATH" FAKE_GROK_MODE=credit run_gd --sandbox off -o "$rep24b" "do a thing"
+if [[ $status24 -eq 0 ]] && cmp -s "$rep24" "$SCRATCHPAD/expected20" &&
+	[[ $run_status -eq 3 ]] && assert_contains "$(cat "$rep24b")" "status 402"; then
+	pass "24 slow tees: ok run still exit 0 with full report; credit still exit 3"
+else
+	fail "24 slow tees: ok run still exit 0 with full report; credit still exit 3" \
+		"ok status=$status24 credit status=$run_status report='$(cat "$rep24b" 2>/dev/null || true)'"
 fi
 
 echo
