@@ -76,6 +76,11 @@ crash)
 empty)
 	exit 0
 	;;
+long)
+	head -c 3000 /dev/zero | tr '\0' 'x'
+	printf '\n'
+	exit 0
+	;;
 *)
 	echo "fake grok: unknown FAKE_GROK_MODE=${FAKE_GROK_MODE}" >&2
 	exit 99
@@ -513,6 +518,23 @@ if [[ $status24 -eq 0 ]] && cmp -s "$rep24" "$SCRATCHPAD/expected20" &&
 else
 	fail "24 slow tees: ok run still exit 0 with full report; credit still exit 3" \
 		"ok status=$status24 credit status=$run_status report='$(cat "$rep24b" 2>/dev/null || true)'"
+fi
+
+# --- 25. A short successful report draws a warning; a full-length one doesn't ---
+# grok's plain mode has exited 0 with only its closing summary while the findings
+# never reached stdout, and the run read as complete. The warning must not change
+# the exit status, and must not fire on a report of real length.
+rep25="$SCRATCHPAD/r25.report"
+FAKE_GROK_MODE=ok run_gd --sandbox off -o "$rep25" "do a thing"
+status25=$run_status
+stderr25=$run_stderr
+FAKE_GROK_MODE=long run_gd --sandbox off -o "$SCRATCHPAD/r25b.report" "do a thing"
+if [[ $status25 -eq 0 ]] && assert_contains "$stderr25" "report is only 13 bytes" &&
+	[[ $run_status -eq 0 ]] && assert_not_contains "$run_stderr" "report is only"; then
+	pass "25 short report warns without changing exit; long report stays quiet"
+else
+	fail "25 short report warns without changing exit; long report stays quiet" \
+		"short status=$status25 stderr='$stderr25' long status=$run_status stderr='$run_stderr'"
 fi
 
 echo
