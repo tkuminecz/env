@@ -1,3 +1,8 @@
+{{- /* Per-host differences live here as hostname branches, so `chezmoi
+       apply` never clobbers them. The defaults are the Mac's settings. */ -}}
+{{- /* Not .chezmoi.hostname: that resolves through /etc/hosts, where the
+       dev stack on jb-dev aliases the machine name onto api.jb-dev. */ -}}
+{{- $h := output "hostname" | trim | splitList "." | first -}}
 {
   "includeCoAuthoredBy": false,
   "permissions": {
@@ -16,9 +21,21 @@
       "Bash(find *)"
     ],
     "deny": [],
-    "ask": []
+    "ask": [
+{{- /* jb-dev2 has no PreToolUse hook (below), so these globs are its only
+       guard. */}}
+{{- if eq $h "jb-dev2" }}
+      "Bash(git push * --force*)",
+      "Bash(rm -rf *)",
+      "Bash(rm -r *)"
+{{- end }}
+    ]
   },
-  "model": "claude-opus-5[1m]",
+{{- if or (eq $h "tim-dev") (eq $h "jb-dev2") }}
+  "model": "opus[1m]",
+{{- else }}
+  "model": "opus",
+{{- end }}
   "enabledMcpjsonServers": [
     "superset-test",
     "superset-staging",
@@ -35,7 +52,7 @@
        --permission-mode bypassPermissions — so instead of warning anyone it
        stalls a review agent mid-run until someone notices. No PreToolUse
        hook on that host; every other machine keeps it. */}}
-{{- if ne .chezmoi.hostname "jb-dev2" }}
+{{- if ne $h "jb-dev2" }}
     "PreToolUse": [
       {
         "matcher": "",
@@ -59,7 +76,33 @@
           }
         ]
       }
+{{- /* queohoh is only installed on tim-dev. */}}
+{{- if eq $h "tim-dev" }},
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.local/bin/queohoh heartbeat",
+            "timeout": 5
+          }
+        ]
+      }
+{{- end }}
     ]
+{{- if eq $h "tim-dev" }},
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.local/bin/queohoh heartbeat",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+{{- end }}
   },
   "statusLine": {
     "type": "command",
@@ -69,6 +112,9 @@
     "claude-hud@claude-hud": true,
     "coderabbit@claude-plugins-official": true,
     "superpowers@superpowers-marketplace": false
+{{- if eq $h "tim-dev" }},
+    "rust-analyzer-lsp@claude-plugins-official": true
+{{- end }}
   },
   "extraKnownMarketplaces": {
     "claude-hud": {
@@ -78,7 +124,48 @@
       }
     }
   },
+{{- if or (eq $h "jb-dev") (eq $h "jb-dev2") }}
+  "effortLevel": "medium",
+{{- else }}
   "effortLevel": "high",
+{{- end }}
+  "modelSettings": {
+{{- if eq $h "jb-dev" }}
+    "claude-fable-5": {
+      "effortLevel": "high"
+    },
+    "claude-fable-5-1": {
+      "effortLevel": "high"
+    },
+    "claude-opus-4-6": {
+      "effortLevel": "high"
+    },
+    "claude-opus-4-8": {
+      "effortLevel": "xhigh"
+    },
+    "claude-opus-5": {
+      "effortLevel": "xhigh"
+    },
+    "claude-opus-5-5": {
+      "effortLevel": "high"
+    }
+{{- else if eq $h "jb-dev2" }}
+    "claude-opus-5-5": {
+      "effortLevel": "medium"
+    }
+{{- else }}
+    "claude-opus-5-5": {
+      "effortLevel": "high"
+    }
+{{- end }}
+  },
+{{- if ne $h "jb-dev2" }}
+  "autoMemoryEnabled": false,
+{{- end }}
+{{- if eq $h "tim-dev" }}
+  "feedbackDrafts": "off",
+  "promptSuggestionEnabled": false,
+{{- end }}
   "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
   "skipWorkflowUsageWarning": true,
@@ -92,10 +179,16 @@
     "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
     {{- /* cutd runs on tim-dev; point at it over the network from every
     other machine, and at localhost on tim-dev itself. */}}
-    {{- if eq .chezmoi.hostname "tim-dev" }}
+    {{- if eq $h "tim-dev" }}
     "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:8420"
     {{- else }}
     "OTEL_EXPORTER_OTLP_ENDPOINT": "http://tim-dev:8420"
     {{- end }}
+{{- if or (eq $h "jb-dev") (eq $h "jb-dev2") }},
+    "OTEL_RESOURCE_ATTRIBUTES": "host.name={{ $h }}"
+{{- end }}
+{{- if eq $h "jb-dev2" }},
+    "DISABLE_AUTOUPDATER": "1"
+{{- end }}
   }
 }
