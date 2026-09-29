@@ -56,6 +56,15 @@ output quality — state the goal, the constraints, and what done looks like, th
 That is the opposite of how to brief sonnet or an external pi delegate, where enumerated steps help. Run it
 in the background: single fable turns on hard tasks routinely take many minutes, and that's expected, not a hang.
 
+## Leverage herdr
+
+When running inside herdr (HERDR_ENV=1), use it actively rather than keeping everything in
+one pane: open documents for review in a vertical pane (`glow -p` for markdown), show diffs
+there, and run delegated agents or long-running work in their own panes/tabs. Anything Tim
+needs to read and react to — a plan, a proposal, a diff — reads better in its own pane than
+scrolled through chat. Close panes when their content is dealt with. Load the `herdr` skill
+for the mechanics.
+
 ## External delegation: GLM, Grok and Codex via `pi`, herdr or queohoh
 
 Tim pays flat-rate subs for z.ai (GLM 5.3 / 5.3-flash / 5.2), x.ai SuperGrok (Grok 4.6, grok-build-0.1) and OpenAI Codex (`gpt-*`, e.g. Codex Luna), all wired into the `pi` coding agent (OpenRouter's DeepSeek models are wired in too, but bill per token). A delegated task costs nothing against Anthropic quota, and a bad one costs a `git diff` and a discard. So **external is the default for verifiable execution work** — not a special-occasion alternative I reach for when asked. Opus/fable routing is unchanged.
@@ -65,21 +74,39 @@ starting any of them — an untagged step drifts to the expensive lane by inerti
 so steps are delegable in parallel (interface-first, packages disjoint by file ownership); the
 `delegate` skill's "Decompose for delegation" section has the mechanics.
 
+**The router applies inside skill flows too.** When a skill (`/github-fix-review-feedback`,
+`/self-review`, etc.) produces a fix list or work items, tag each item grok/glm/claude before
+starting, same as a plan. And for multi-package features, maximum parallel fan-out is the
+default — decompose for width first, not a sequential plan with a couple of delegated steps.
+
 **Delegate by default** — don't deliberate, write the brief and go:
 
-- writing tests to a spec, or turning a described bug into a failing test
+- writing tests to a spec, or turning a described bug into a failing test — and for any package
+  worth TDD, split it: one delegate writes the RED suite blind, another implements to green and
+  may not edit the tests (validated 4/4 A across three providers)
 - mechanical refactors, renames, signature changes across files
 - boilerplate scaffolding — new service file sets, charts, config plumbing
 - "make this lint / typecheck / format clean"
-- doc and comment sweeps
+- doc and comment sweeps (then read every rewritten comment against the code, since clarity
+  rewrites have introduced false claims)
 - any fan-out of similar independent chunks
+- final read-only merge-readiness reviews of a big diff → the 4-model panel (grok CLI with
+  `--read-only` + glm + deepseek + one opus Agent as reference; `delegate` skill "Read-only
+  review panels")
 
 **Don't delegate**:
 
 - anything touching prod, secrets, credentials, or live infra
-- DB migrations and other irreversible or hard-to-review changes
+- applying migrations to any shared database, and other irreversible or hard-to-review changes.
+  *Writing* a migration revision against a schema contract I pinned is delegable. All 7 such
+  packages graded A (08-20→09-22), and the one defect that turned up was in my contract. The
+  brief names the 32-char revision-id cap and requires `upgrade head` then `downgrade` on real
+  Postgres, or offline `--sql` with the live run owed to me
 - work where writing the spec *is* the hard part — if I can't write the brief, delegating only moves the problem
 - anything needing this conversation's context that won't fit in a brief
+- live-environment evidence: MCP-backed queries (dagster-plus, Superset, Sentry) and
+  in-process harness measurements. Delegates have no MCP, so pair their sweep with a Claude
+  lane for that part
 - final judgment calls: what to ship, what to tell Tim, whether a review finding is real
 - program-sized builds (≳3k changed lines or a whole subsystem): Opus builds those. In the mgc
   ledger, 20 Opus-built lanes had zero C grades; external builders at that size hit lane caps,
@@ -87,13 +114,21 @@ so steps are delegable in parallel (interface-first, packages disjoint by file o
   binding limit, and then behind a mechanical gate (skill: "Size line")
 
 Two wrappers on PATH, both dry-runnable with `-n`, never hand-composed flags: **`grok-delegate`**
-for unattended grok package builds via the grok CLI (deny rules, `--max-turns`,
-schema-constrained reports; its kernel sandbox needs bubblewrap, not yet installed here), and
-**`pi-delegate`** for everything else — GLM models, Codex (`-m gpt-5.6-luna`), OpenRouter ids,
-**grok-build-0.1** (the mechanical-swarm lane: fast small edits and wide tiny fan-outs; first reps
-2026-09-26), quick one-shots, and session fix loops. It bakes in the mandatory `--thinking low`, re-adds the
-permission-gate extension that `-ne` strips, and derives the provider from the model name. Load
-the `delegate` skill for the full playbook (brief template, decompose-for-delegation, worktree
-pipeline, review step, scorecard). Non-negotiables: require self-verification in every brief,
-independently review the diff myself before accepting, and append a row to the skill's `LOG.md`
-afterward.
+for unattended grok package builds via the grok CLI — **now the primary and best-graded
+lane** (deny rules, `--max-turns 80`, `--read-only` for review lanes, exit 3 when x.ai refuses
+for credit, schema-constrained reports; its kernel sandbox needs bubblewrap, not yet installed on
+tim-dev, and auto-downgrades where the host denies user namespaces) —
+and **`pi-delegate`** for everything else — GLM models, Codex (`-m gpt-5.6-luna`), OpenRouter ids,
+**grok-build-0.1** (the mechanical-swarm lane: keep its packages genuinely tiny; its edits land
+but its *report phase* is where it dies, so re-run every gate it claims and expect to salvage;
+first tim-dev reps 2026-09-26), quick one-shots, and fix loops. It bakes in the mandatory
+`--thinking low`, re-adds the permission-gate extension that `-ne` strips, derives the provider
+from the model name, and **watchdogs the run by CPU**: the delegate gets its own process group,
+tree-CPU is sampled every 20s to a heartbeat file, and a tree burning zero CPU for 6min is killed
+as hung (exit 125; 60min backstop cap = 124). `tail -3 <heartbeat>` answers "is it alive?" in a
+second — check it early rather than waiting on a notification that never comes for a hang. Load
+the `delegate` skill for
+the full playbook (brief template, decompose-for-delegation, worktree pipeline, review step,
+scorecard). Non-negotiables: require self-verification **with pasted command output** in every
+brief, independently review the diff myself before accepting, and append a row to the skill's
+`LOG.md` afterward.

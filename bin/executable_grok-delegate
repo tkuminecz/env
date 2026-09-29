@@ -13,7 +13,17 @@
 #   default --deny rules — sudo / rm -rf / chmod 777 (parity with pi-kit's
 #       permission-gate) plus git push (delegates commit; Claude reviews and pushes).
 #       Deny rules still apply under bypassPermissions.
-#   --max-turns 40 — runaway protection; raise per-run when a battery needs it.
+#   --max-turns 80 — runaway protection. Was 40, but a cap is always hit at the
+#       END of a run, so the phase it eats is verification: five packages lost
+#       their mutation-RED proofs to the 40 cap while their edits were complete.
+#       Budget roughly 40 + 8 per demanded proof; raise per-run for wide briefs.
+#
+# Sandbox auto-fallback: grok's sandbox needs unprivileged user namespaces, which
+# some hosts deny (jb-dev: "bwrap: setting up uid map: Permission denied"). grok
+# then exits 0 with a one-line error that reads as SUCCESS in a task notification,
+# so the run silently does nothing. Without an explicit --sandbox we
+# probe the primitive and fall back to `off` with a loud warning rather than
+# handing back a fake success; an explicit profile that cannot be honoured exits 2.
 #
 # Playbook, briefs, review pipeline and scorecard: ~/.claude/skills/delegate/
 
@@ -24,11 +34,13 @@ workdir="$PWD"
 brief_file=""
 resume=""
 json_schema=""
-max_turns="40"
+max_turns="80"
 sandbox="workspace"
+sandbox_explicit=0
 worktree=""
 worktree_ref=""
 default_denies=1
+read_only=0
 dry_run=0
 prompt=""
 report=""
@@ -51,24 +63,36 @@ Options:
   -C, --dir <path>        working dir for the delegate (default: cwd). Use the
                           repo root so grok discovers AGENTS.md / project config.
   -f, --file <path>       brief file; passed natively via --prompt-file <abs>
-  -T, --max-turns <n>     agent turn cap (default 40)
+  -T, --max-turns <n>     agent turn cap (default 80). A cap is hit at the END of
+                          a run, so it eats verification: budget ~40 + 8 per
+                          mutation-RED proof the brief demands.
+  -o, --report <p>        tee the delegate's stdout (its final report) to this
+                          file (default $TMPDIR/grok-delegate-<pid>.report) so a
+                          piped or truncated caller stdout can never lose it
   -s, --resume <id>       resume an existing grok session (fix loops)
-      --sandbox <profile> sandbox profile (default workspace; off|read-only|strict|...)
+      --sandbox <profile> sandbox profile (default workspace, auto-downgraded to
+                          off with a warning where the kernel denies user
+                          namespaces; off|read-only|strict|...)
       --json <schema>     constrained JSON output via --json-schema (implies json
                           output format)
       --allow <rule>      extra permission allow rule (repeatable)
       --deny <rule>       extra permission deny rule (repeatable)
       --no-default-denies drop the baked deny rules (sudo, rm -rf, chmod 777,
                           git push) — say why in the session notes
+      --read-only         path-scoped Edit/Write denies on the workdir (and git
+                          roots) plus denies for git add/commit/stash/checkout/
+                          restore/reset/clean — keeps shell redirects and /tmp
+                          usable. Prefer this over a bare --deny Edit/Write.
       --worktree [<name>] grok-managed worktree — requires an explicit
                           --worktree-ref (its default base is a footgun, and it
                           skips wt hooks; prefer `wt switch --create` + -C)
       --worktree-ref <r>  base ref for --worktree
-  -o, --report <p>        tee the delegate's stdout (its final report) to this
-                          file (default $TMPDIR/grok-delegate-<pid>.report) so a
-                          piped or truncated caller stdout can never lose it
   -n, --dry-run           print the grok command without running it
   -h, --help              show this
+
+Exit codes: 0 ok; 1 empty report on success status; 2 usage/config error;
+3 provider refused (402/429 / credit / rate-limit). Other codes pass through
+from grok.
 
 Every brief should state a self-verification step ("run the tests and report
 PASS/FAIL with output") and ask for a deviations list. Always review the diff
@@ -94,20 +118,21 @@ while [[ $# -gt 0 ]]; do
 		max_turns="${2:?--max-turns needs a value}"
 		shift 2
 		;;
+	-o | --report)
+		report="${2:?--report needs a value}"
+		shift 2
+		;;
 	-s | --resume)
 		resume="${2:?--resume needs a value}"
 		shift 2
 		;;
 	--sandbox)
 		sandbox="${2:?--sandbox needs a value}"
+		sandbox_explicit=1
 		shift 2
 		;;
 	--json)
 		json_schema="${2:?--json needs a schema}"
-		shift 2
-		;;
-	-o | --report)
-		report="${2:?--report needs a value}"
 		shift 2
 		;;
 	--allow)
@@ -115,11 +140,22 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	--deny)
-		extra_rules+=(--deny "${2:?--deny needs a rule}")
+		_deny_rule="${2:?--deny needs a rule}"
+		# Bare Edit/Write also blocks every shell redirect and /tmp file writes.
+		if [[ "$_deny_rule" =~ ^(Edit|Write)(\((\*|\*\*|/\*\*)\))?$ ]]; then
+			echo "grok-delegate: a bare Edit/Write deny also blocks every shell redirect (even 2>/dev/null) and file writes in /tmp — use --read-only, or deny Edit(<abs-path>/**) explicitly" >&2
+			exit 2
+		fi
+		extra_rules+=(--deny "$_deny_rule")
+		unset _deny_rule
 		shift 2
 		;;
 	--no-default-denies)
 		default_denies=0
+		shift
+		;;
+	--read-only)
+		read_only=1
 		shift
 		;;
 	--worktree)
@@ -181,13 +217,34 @@ fi
 
 # Preflight for sandbox: grok's non-off sandboxes require bwrap (bubblewrap) on Linux.
 # GROK_DELEGATE_BWRAP (default bwrap) lets tests simulate missing bwrap via command -v.
-if [[ "$sandbox" != "off" ]] && ! command -v "${GROK_DELEGATE_BWRAP:-bwrap}" >/dev/null 2>&1; then
+bwrap_cmd="${GROK_DELEGATE_BWRAP:-bwrap}"
+if [[ "$sandbox" != "off" ]] && ! command -v "$bwrap_cmd" >/dev/null 2>&1; then
 	msg="grok-delegate: --sandbox $sandbox needs bubblewrap (bwrap), which is not installed. Install it (sudo apt install bubblewrap) or pass --sandbox off (drops the kernel write fence; deny rules still apply)."
 	if ((dry_run)); then
 		echo "WARNING: $msg" >&2
 	else
 		echo "$msg" >&2
 		exit 2
+	fi
+fi
+
+# Unprivileged user namespaces are what the sandbox is built on; if the kernel
+# denies them, an unattended sandboxed run fails as a fake success (see header).
+if [[ "$sandbox" != off ]]; then
+	# Only conclude "denied" when bwrap exists and fails — a missing bwrap is the
+	# preflight above's job, not a reason to weaken the sandbox on a guess.
+	if command -v "$bwrap_cmd" >/dev/null 2>&1 &&
+		! "$bwrap_cmd" --dev-bind / / --unshare-user true >/dev/null 2>&1; then
+		# An explicit profile (e.g. read-only for a review panel) is a posture the
+		# caller asked for; silently weakening it is worse than refusing to run.
+		if ((sandbox_explicit)); then
+			echo "grok-delegate: --sandbox $sandbox requested, but user namespaces are denied on this host." >&2
+			echo "grok-delegate: grok would exit 0 having done nothing. Drop --sandbox (auto-downgrade) and fence with --deny rules." >&2
+			exit 2
+		fi
+		echo "grok-delegate: user namespaces denied on this host — falling back to --sandbox off." >&2
+		echo "grok-delegate: the deny rules still apply; keep the fence in the brief." >&2
+		sandbox="off"
 	fi
 fi
 
@@ -202,6 +259,43 @@ args=(
 
 ((default_denies)) && args+=("${DEFAULT_DENIES[@]}")
 [[ ${#extra_rules[@]} -gt 0 ]] && args+=("${extra_rules[@]}")
+
+# Path-scoped Edit/Write: a bare Edit/Write deny gates every shell redirect
+# (including 2>/dev/null) and the file tool in /tmp. Verified 2026-09-28.
+if ((read_only)); then
+	_ro_dirs=()
+	_ro_add() {
+		local d="$1" existing
+		[[ -n "$d" ]] || return 0
+		for existing in "${_ro_dirs[@]+"${_ro_dirs[@]}"}"; do
+			[[ "$existing" == "$d" ]] && return 0
+		done
+		_ro_dirs+=("$d")
+	}
+	_ro_add "$(cd "$workdir" && pwd -P)"
+	if git -C "$workdir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+		_ro_add "$(git -C "$workdir" rev-parse --show-toplevel)"
+		_ro_common="$(git -C "$workdir" rev-parse --path-format=absolute --git-common-dir)"
+		if [[ "$(basename "$_ro_common")" == ".git" ]]; then
+			_ro_add "$(dirname "$_ro_common")"
+		fi
+		unset _ro_common
+	fi
+	for _ro_p in "${_ro_dirs[@]}"; do
+		args+=(--deny "Edit(${_ro_p}/**)" --deny "Write(${_ro_p}/**)")
+	done
+	args+=(
+		--deny "Bash(git add*)"
+		--deny "Bash(git commit*)"
+		--deny "Bash(git stash*)"
+		--deny "Bash(git checkout*)"
+		--deny "Bash(git restore*)"
+		--deny "Bash(git reset*)"
+		--deny "Bash(git clean*)"
+	)
+	unset _ro_dirs _ro_p
+	unset -f _ro_add
+fi
 
 if [[ -n "$json_schema" ]]; then
 	args+=(--json-schema "$json_schema")
@@ -233,12 +327,56 @@ if ((dry_run)); then
 	exit 0
 fi
 
-cd "$workdir"
+# Nothing else checks the retro trigger, so every real launch does (never fails the run).
+command -v delegate-retro-due >/dev/null 2>&1 && delegate-retro-due >&2 || true
+
+# The Write/Edit tools have turned a "\u00a0" escape into a literal NBSP, and that shipped
+# straight into a delegate's test. Warn only; never fails the run.
+if [[ -n "$brief_file" ]] && command -v delegate-brief-check >/dev/null 2>&1; then
+	delegate-brief-check "$abs_brief" >&2 || true
+fi
 
 # Every byte grok prints also lands in the report file, so a truncated or piped
 # stdout on the caller's side (a `tail`, a full buffer) can never lose the report.
 : "${report:=${TMPDIR:-/tmp}/grok-delegate-$$.report}"
 : >"$report"
+: >"$report.stderr"
 echo "grok-delegate: report -> $report  (full stdout, survives caller-side truncation)" >&2
 
-exec grok "${args[@]}" > >(tee -a "$report")
+cd "$workdir"
+# The stderr tee gets its own fd so its pid is known. Written inside the pipeline, it
+# ran in the pipeline's subshell, where the parent's `wait` can't reach it, and a 402
+# printed just before exit could still be in the pipe when the check below read the
+# file. The drain is bounded because a grandchild still holding the pipe must not
+# hang the wrapper. The report tee is a pipeline member, so the shell waits for it.
+exec {err_fd}> >(tee -a "$report.stderr" >&2)
+err_tee=$!
+set +e
+grok "${args[@]}" 2>&"$err_fd" {err_fd}>&- | tee -a "$report"
+status=${PIPESTATUS[0]}
+set -e
+exec {err_fd}>&-
+for _ in $(seq 50); do
+	kill -0 "$err_tee" 2>/dev/null || break
+	sleep 0.1
+done
+
+if [[ $status -eq 0 && -s "$report" ]]; then
+	exit 0
+fi
+
+{
+	echo
+	echo "---- grok-delegate: grok exited ${status}; the report above may be partial or empty. Last stderr lines:"
+	tail -n 20 "$report.stderr"
+} | tee -a "$report"
+
+if grep -qiE '(status|http|code|error)[^0-9]{0,15}(402|429)|payment required|balance exhausted|too many requests|rate[ _-]?limit|quota' "$report.stderr"; then
+	echo "grok-delegate: PROVIDER REFUSED (x.ai) — out of credit or rate-limited. A 402 is an outage for the rest of the day: salvage the tree (git status, git diff, re-run the package's gates) and reroute to glm (pi-delegate -m glm-5.2). A 429 may clear on one relaunch." >&2
+	exit 3
+fi
+
+if [[ $status -eq 0 ]]; then
+	exit 1
+fi
+exit "$status"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-contained test suite for ~/bin/pi-delegate (dry-run only).
+# Self-contained test suite for pi-delegate (dry-run + fake-binary real mode).
 set -u
 
 PI_DELEGATE="${PI_DELEGATE:-$HOME/bin/pi-delegate}"
@@ -53,6 +53,35 @@ assert_not_contains() {
 	*"$2"*) return 1 ;;
 	*) return 0 ;;
 	esac
+}
+
+# Install a fake pi on PATH whose behaviour is selected by FAKE_PI_MODE.
+install_fake_pi() {
+	local fake_bin="$SCRATCHPAD/fakebin-pi"
+	mkdir -p "$fake_bin"
+	cat >"$fake_bin/pi" <<'FAKE'
+#!/usr/bin/env bash
+case "${FAKE_PI_MODE:-ok}" in
+ok)
+	printf 'final report\n'
+	exit 0
+	;;
+refuse)
+	echo 'Error: 429 Too Many Requests' >&2
+	exit 1
+	;;
+crash)
+	echo 'boom' >&2
+	exit 7
+	;;
+*)
+	echo "fake pi: unknown FAKE_PI_MODE=${FAKE_PI_MODE}" >&2
+	exit 99
+	;;
+esac
+FAKE
+	chmod +x "$fake_bin/pi"
+	export PATH="$fake_bin:$PATH"
 }
 
 # --- 1. Default invocation resolves to --provider xai --model grok-4.6 ---
@@ -273,7 +302,76 @@ else
 		"status=$run_status stdout='$run_stdout'"
 fi
 
-# --- 14. vendor/model ids route to openrouter ---
+# --- 14–16. Real mode via fake pi: ok / 429 refusal / crash ---
+# Watchdog path (default) so stderr is captured; fake exits immediately.
+# -m glm-5.2 => provider zai => refusal must suggest grok-delegate.
+install_fake_pi
+
+# 14. ok: exit 0, report byte-identical to pi stdout (no trailer).
+rep14="$SCRATCHPAD/p14.report"
+hb14="$SCRATCHPAD/p14.heartbeat"
+FAKE_PI_MODE=ok run_pd -m glm-5.2 -o "$rep14" --heartbeat "$hb14" "do a thing"
+printf 'final report\n' >"$SCRATCHPAD/expected14"
+if [[ $run_status -eq 0 ]] && cmp -s "$rep14" "$SCRATCHPAD/expected14"; then
+	pass "14 real-mode ok: exit 0, report byte-identical"
+else
+	fail "14 real-mode ok: exit 0, report byte-identical" \
+		"status=$run_status report='$(cat "$rep14" 2>/dev/null || true)' stderr='$run_stderr'"
+fi
+
+# 15. 429 refusal: exit 3, PROVIDER REFUSED names zai, suggests grok-delegate.
+rep15="$SCRATCHPAD/p15.report"
+hb15="$SCRATCHPAD/p15.heartbeat"
+FAKE_PI_MODE=refuse run_pd -m glm-5.2 -o "$rep15" --heartbeat "$hb15" "do a thing"
+if [[ $run_status -eq 3 ]] &&
+	assert_contains "$run_stderr" "PROVIDER REFUSED" &&
+	assert_contains "$run_stderr" "zai" &&
+	assert_contains "$run_stderr" "grok-delegate" &&
+	assert_contains "$(cat "$rep15")" "pi exited 1" &&
+	assert_contains "$(cat "$rep15")" "429"; then
+	pass "15 real-mode 429: exit 3, suggests grok-delegate"
+else
+	fail "15 real-mode 429: exit 3, suggests grok-delegate" \
+		"status=$run_status stderr='$run_stderr' report='$(cat "$rep15" 2>/dev/null || true)'"
+fi
+
+# 16. crash: exit 7, trailer has boom, no PROVIDER REFUSED.
+rep16="$SCRATCHPAD/p16.report"
+hb16="$SCRATCHPAD/p16.heartbeat"
+FAKE_PI_MODE=crash run_pd -m glm-5.2 -o "$rep16" --heartbeat "$hb16" "do a thing"
+if [[ $run_status -eq 7 ]] &&
+	assert_contains "$(cat "$rep16")" "pi exited 7" &&
+	assert_contains "$(cat "$rep16")" "boom" &&
+	assert_not_contains "$run_stderr" "PROVIDER REFUSED"; then
+	pass "16 real-mode crash: exit 7, trailer has boom, no refusal"
+else
+	fail "16 real-mode crash: exit 7, trailer has boom, no refusal" \
+		"status=$run_status stderr='$run_stderr' report='$(cat "$rep16" 2>/dev/null || true)'"
+fi
+
+# --- 17. The wrapper waits for its tees to drain before judging the run ---
+# pi's final answer is written just before it exits, so the report tee can still be
+# copying when the wrapper checks for an empty report. A bare `wait` does not wait for
+# process substitutions, and that race turned a successful run into "empty report,
+# exit 1". A tee that sleeps before copying makes the race deterministic.
+real_tee="$(command -v tee)"
+slow_bin="$SCRATCHPAD/slowtee"
+mkdir -p "$slow_bin"
+printf '#!/usr/bin/env bash\nsleep 1\nexec %q "$@"\n' "$real_tee" >"$slow_bin/tee"
+chmod +x "$slow_bin/tee"
+rep17="$SCRATCHPAD/p17.report"
+rep17b="$SCRATCHPAD/p17b.report"
+PATH="$slow_bin:$PATH" FAKE_PI_MODE=ok run_pd -m glm-5.2 -o "$rep17" --heartbeat "$SCRATCHPAD/p17.hb" "do a thing"
+status17=$run_status
+PATH="$slow_bin:$PATH" FAKE_PI_MODE=refuse run_pd -m glm-5.2 -o "$rep17b" --heartbeat "$SCRATCHPAD/p17b.hb" "do a thing"
+if [[ $status17 -eq 0 ]] && cmp -s "$rep17" "$SCRATCHPAD/expected14" && [[ $run_status -eq 3 ]]; then
+	pass "17 slow tees: ok run still exit 0 with full report; refusal still exit 3"
+else
+	fail "17 slow tees: ok run still exit 0 with full report; refusal still exit 3" \
+		"ok status=$status17 report='$(cat "$rep17" 2>/dev/null || true)' refuse status=$run_status"
+fi
+
+# --- 18. vendor/model ids route to openrouter ---
 # OpenRouter model ids are always "<vendor>/<model>", so the slash is what marks
 # them; the id must reach pi unchanged because OpenRouter needs the vendor prefix.
 run_pd -n -m openai/gpt-6-luna "do a thing"
@@ -291,26 +389,26 @@ if [[ $run_status -eq 0 ]] &&
 	ds_ok=1
 fi
 if [[ $luna_ok -eq 1 && $ds_ok -eq 1 ]]; then
-	pass "14 vendor/model ids route to openrouter with the id unchanged"
+	pass "18 vendor/model ids route to openrouter with the id unchanged"
 else
-	fail "14 vendor/model ids route to openrouter with the id unchanged" \
+	fail "18 vendor/model ids route to openrouter with the id unchanged" \
 		"luna_ok=$luna_ok ds_ok=$ds_ok stdout='$run_stdout' stderr='$run_stderr'"
 fi
 
-# --- 15. a z.ai model id with a vendor prefix still goes to openrouter, not zai ---
+# --- 19. a z.ai model id with a vendor prefix still goes to openrouter, not zai ---
 # glm models are also sold on OpenRouter as "z-ai/glm-*"; the prefix means the
 # caller chose OpenRouter billing, so the glm* rule must not capture it.
 run_pd -n -m z-ai/glm-5.3 "do a thing"
 if [[ $run_status -eq 0 ]] &&
 	assert_contains "$run_stdout" "--provider openrouter" &&
 	assert_not_contains "$run_stdout" "--provider zai"; then
-	pass "15 z-ai/glm-* routes to openrouter, not zai"
+	pass "19 z-ai/glm-* routes to openrouter, not zai"
 else
-	fail "15 z-ai/glm-* routes to openrouter, not zai" \
+	fail "19 z-ai/glm-* routes to openrouter, not zai" \
 		"status=$run_status stdout='$run_stdout' stderr='$run_stderr'"
 fi
 
-# --- 16. gpt-* routes to openai-codex ---
+# --- 20. gpt-* routes to openai-codex ---
 # gpt-* ids must reach the flat-rate openai-codex subscription; falling through to
 # openrouter would bill per token for the same model.
 run_pd -n -m gpt-5.6-luna "do a thing"
@@ -318,9 +416,9 @@ if [[ $run_status -eq 0 ]] &&
 	assert_contains "$run_stdout" "--provider openai-codex" &&
 	assert_contains "$run_stdout" "--model gpt-5.6-luna" &&
 	assert_not_contains "$run_stdout" "--provider openrouter"; then
-	pass "16 gpt-* routes to openai-codex"
+	pass "20 gpt-* routes to openai-codex"
 else
-	fail "16 gpt-* routes to openai-codex" \
+	fail "20 gpt-* routes to openai-codex" \
 		"status=$run_status stdout='$run_stdout' stderr='$run_stderr'"
 fi
 

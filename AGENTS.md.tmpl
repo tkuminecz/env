@@ -1,5 +1,8 @@
 # General rules
 
+{{- /* Only jb-dev2 sits behind the prod/staging egress guard. */}}
+{{- if eq (output "hostname" | trim | splitList "." | first) "jb-dev2" }}
+
 **Prod and staging are off-limits on this box (jb-dev2) — network AND APIs.**
 Only the test environment may be touched.
 
@@ -20,6 +23,7 @@ Only the test environment may be touched.
   puzzle. Test-project APIs (`jb-platform-test`) are fine.
 - Anything that genuinely needs prod or staging — network or API — goes
   through Tim, never around him.
+{{- end }}
 
 Use simpler and plainer english style of explanation.
 
@@ -76,7 +80,7 @@ When replying to a comment, tag who wrote the original comment we are replying t
 
 If you're replying to a comment with a fix, include the short commit ID that contains the fix. This means you should typically push your commits to the remote before replying.
 
-Don't add replies without showing a draft and confirming with the user.
+Post replies directly (no draft-approval step) and report the links; only ask first when a reply commits to a scope or design decision I haven't made.
 
 When you reply to a comment, include a direct link to the reply.
 
