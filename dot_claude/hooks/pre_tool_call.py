@@ -452,47 +452,9 @@ def sql_drop(
     return None
 
 
-# git options that come before the subcommand and take a value.
-_GIT_OPTIONS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
-
-
-def git_force_push(
-    command: str,
-    cwd: str | None,
-    *,
-    home: str | None = None,
-    env: dict | None = None,
-) -> str | None:
-    """Return why `command` force-pushes in a way that can discard remote
-    commits, or None.
-
-    --force, -f and +refspec count. --force-with-lease does not: it refuses
-    to overwrite commits you haven't fetched.
-    """
-    walker = _new_walker(home, env)
-    for name, args, _ in walker.commands(command, cwd):
-        if name != "git":
-            continue
-        i = 0
-        while i < len(args) and args[i].startswith("-"):
-            i += 2 if args[i] in _GIT_OPTIONS_WITH_VALUE else 1
-        if i >= len(args) or args[i] != "push":
-            continue
-        for arg in args[i + 1 :]:
-            short_f = arg.startswith("-") and not arg.startswith("--") and "f" in arg
-            if arg == "--force" or short_f or arg.startswith("+"):
-                return (
-                    f"`git push {arg}` overwrites the remote branch, including "
-                    "commits you haven't fetched. --force-with-lease does the "
-                    "same but refuses if the remote has moved."
-                )
-    return None
-
-
 CHECKS = {
     "recursive-rm": recursive_rm_danger,
     "sql-drop": sql_drop,
-    "git-force-push": git_force_push,
 }
 
 

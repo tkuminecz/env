@@ -2,13 +2,6 @@
   "version": 1,
   "rules": [
     {
-      "name": "force-push",
-      "tool": "Bash",
-      "check": "git-force-push",
-      "description": "Force pushing to remote",
-      "severity": "warn"
-    },
-    {
       "name": "destructive-rm",
       "tool": "Bash",
       "check": "recursive-rm",

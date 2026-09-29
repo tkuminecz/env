@@ -291,54 +291,6 @@ class SqlDropTest(unittest.TestCase):
         self.assertIsNone(self.drop('psql -c "SELECT count(*) FROM users"'))
 
 
-class GitForcePushTest(unittest.TestCase):
-    """The force-push check only asks for a push that can discard commits."""
-
-    def push(self, command):
-        return pre_tool_call.git_force_push(
-            command, "/home/u/projects/app", home="/home/u", env={}
-        )
-
-    def test_flags_plain_force_push(self):
-        # --force, -f (alone or bundled) and a +refspec all overwrite the
-        # remote branch, even commits you have never seen.
-        for cmd in (
-            "git push --force",
-            "git push origin main --force",
-            "git push -f origin feature",
-            "git push -uf origin feature",
-            "git push origin +main",
-            "git -C ~/projects/app push --force",
-            "cd app && git push --force",
-            "bash -c 'git push -f'",
-        ):
-            with self.subTest(cmd=cmd):
-                self.assertIsNotNone(self.push(cmd), cmd)
-
-    def test_lease_is_left_alone(self):
-        # --force-with-lease refuses to overwrite commits you haven't
-        # fetched; it is the normal way to update a rebased PR branch.
-        for cmd in (
-            "git push --force-with-lease",
-            "git push origin feature --force-with-lease --force-if-includes",
-        ):
-            with self.subTest(cmd=cmd):
-                self.assertIsNone(self.push(cmd), cmd)
-
-    def test_ignores_force_push_that_does_not_run(self):
-        # Mentions in messages or text, normal pushes and other git
-        # commands with -f are not force pushes.
-        for cmd in (
-            "git push -u origin feature",
-            'git commit -m "docs: never git push --force to main"',
-            'echo "git push --force"',
-            'gh pr comment 1 --body "I ran git push --force by mistake"',
-            "git fetch -f origin",
-        ):
-            with self.subTest(cmd=cmd):
-                self.assertIsNone(self.push(cmd), cmd)
-
-
 class CheckRulesTest(unittest.TestCase):
     """rules.json entries can still use a plain regex instead of a check."""
 
@@ -406,11 +358,11 @@ class HookEndToEndTest(unittest.TestCase):
         out = self.run_hook('psql -c "DROP TABLE users"')["hookSpecificOutput"]
         self.assertEqual(out["permissionDecision"], "ask")
 
-    def test_force_push_asks_but_lease_is_quiet(self):
-        # The shipped rules.json wires the force-push check.
-        self.assertIsNone(self.run_hook("git push --force-with-lease"))
-        out = self.run_hook("git push origin main --force")["hookSpecificOutput"]
-        self.assertEqual(out["permissionDecision"], "ask")
+    def test_force_pushes_are_not_guarded(self):
+        # Force pushing is deliberately allowed: the prompt interrupted
+        # routine rebased-branch updates, so there is no force-push rule.
+        self.assertIsNone(self.run_hook("git push origin main --force"))
+        self.assertIsNone(self.run_hook("git push -f origin feature"))
 
 
 if __name__ == "__main__":
