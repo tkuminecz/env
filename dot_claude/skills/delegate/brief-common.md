@@ -35,6 +35,8 @@ explicitly overrides one of them, follow the brief.
   you finish and list anything you couldn't remove.
 - For a mutation copy, `cp -r` the one package under test (tens of MB) rather than adding a
   full worktree, which has filled this host's disk.
+- Never symlink from a scratch copy into the repo. Copy the file. A write through one such
+  symlink replaced a committed 1155-line `dev.env` with a single line.
 
 ## Stop conditions
 
@@ -47,6 +49,9 @@ explicitly overrides one of them, follow the brief.
   every seed dict, a schema snapshot, or every compose file), decide whether your change or
   the guard's population is wrong. Report a wrong population. Don't change production code
   just to satisfy a guard.
+- If the test state the brief describes can only be seeded by dropping or altering a
+  constraint, an index or a trigger, the schema forbids that state and the premise is false.
+  STOP and report it. Never change the schema inside a test to make a scenario possible.
 
 ## Permanent files: vocabulary and truth
 
@@ -72,9 +77,11 @@ is not evidence. The format check covers every file you wrote **or regenerated**
 generated snapshots and JSON (`pnpm exec biome format --write <file>`), because the hook
 reformats them at commit.
 
-When you change behaviour that other code shares (a dbt mart, a seed or fixture, a shared
-helper), the test gate is the whole test directory of every service involved, not only the
-files the brief names. A semantic change breaks suites nobody listed.
+The test gate is the whole unit test directory of every service you touch, not only the
+files the brief names, plus the REST or route suite for any endpoint your change reaches.
+Structural guards and route-level failures sit in suites nobody listed. When you change
+behaviour that other code shares (a dbt mart, a seed or fixture, a shared helper), that
+includes the integration directories too.
 
 When your deliverables include tests, give a mutation-RED proof for each core behaviour:
 break the production code under test, paste the failing output, restore it byte-identical
@@ -103,8 +110,33 @@ your copy's package directories and check again. An editable install can still w
 `pytest.main([...])` from it, then confirm `__file__` again. Never copy mutated files into
 the shared checkout to get around it.
 
+Traps that no gate here catches:
+
+- Never change production code to make a test double fit. Change the double.
+- A name imported only under `if TYPE_CHECKING:` must not appear in a runtime expression,
+  such as the first argument of `cast()` or an `isinstance`. ty passes it and the route
+  raises `NameError`. Quote it (`cast("list[T]", rows)`).
+- Never let set or frozenset iteration order reach output, an error message, a stored payload
+  or a digest. String hashing differs per process, so the same input comes out in a different
+  order. Iterate in the source's order or sort.
+- When a check depends on what a reader yields (CSV or Excel inference, a JSON relay), at
+  least one test goes through the real reader. A hand-built frame of the type you expect hides
+  the type the reader actually produces.
+- A seeded test world pins the absolute count of every table it seeds, not only the deltas
+  under test. When both sides of a comparison go wrong together, the deltas cancel.
+
 If you notice an issue in your own output, fix it or argue it in the deviations report.
 Don't just mention it.
+
+## Read-only lanes (reviews, sweeps, research)
+
+- Mutate only in a `/tmp` copy, a detached worktree or a runtime pytest plugin, never in the
+  shared checkout. A dev stack may be hot-reloading it, so an in-place mutation reaches a live
+  service. Remove your copies when you finish.
+- Run the code to test your claims. A finding backed by a run beats one backed by a read.
+- Before your final message, write the full report to the file the launch prompt names, with
+  a quoted heredoc (`cat > <path> <<'EOF'`). Then print it as well. The final message alone
+  has come back as just a preamble or a closing summary.
 
 ## Report
 

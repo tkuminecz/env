@@ -77,6 +77,11 @@ crash)
 empty)
 	exit 0
 	;;
+long)
+	head -c 3000 /dev/zero | tr '\0' 'x'
+	printf '\n'
+	exit 0
+	;;
 *)
 	echo "fake grok: unknown FAKE_GROK_MODE=${FAKE_GROK_MODE}" >&2
 	exit 99
@@ -600,6 +605,23 @@ if [[ $run_status -eq 0 ]] &&
 else
 	fail "28 default sandbox, bwrap present, real run: no msg, grok ran" \
 		"status=$run_status stderr='$run_stderr' marker=$( [[ -f "$marker28" ]] && echo yes || echo no )"
+fi
+
+# --- 29. A short successful report draws a warning; a full-length one doesn't ---
+# grok's plain mode has exited 0 with only its closing summary while the findings
+# never reached stdout, and the run read as complete. The warning must not change
+# the exit status, and must not fire on a report of real length.
+rep29="$SCRATCHPAD/r29.report"
+FAKE_GROK_MODE=ok run_gd --sandbox off -o "$rep29" "do a thing"
+status29=$run_status
+stderr29=$run_stderr
+FAKE_GROK_MODE=long run_gd --sandbox off -o "$SCRATCHPAD/r29b.report" "do a thing"
+if [[ $status29 -eq 0 ]] && assert_contains "$stderr29" "report is only 13 bytes" &&
+	[[ $run_status -eq 0 ]] && assert_not_contains "$run_stderr" "report is only"; then
+	pass "29 short report warns without changing exit; long report stays quiet"
+else
+	fail "29 short report warns without changing exit; long report stays quiet" \
+		"short status=$status29 stderr='$stderr29' long status=$run_status stderr='$run_stderr'"
 fi
 
 echo

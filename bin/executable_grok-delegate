@@ -362,6 +362,12 @@ for _ in $(seq 50); do
 done
 
 if [[ $status -eq 0 && -s "$report" ]]; then
+	# Plain output mode can exit 0 with only a preamble or the closing summary as the
+	# final answer, and the full findings never reach stdout.
+	report_bytes=$(($(wc -c <"$report")))  # arithmetic drops the padding BSD wc adds
+	if ((report_bytes < 1500)); then
+		echo "grok-delegate: report is only ${report_bytes} bytes — plain mode sometimes returns just a preamble or closing summary. Read it before trusting it; for research/review lanes, brief grok to heredoc its full report to a file." >&2
+	fi
 	exit 0
 fi
 
