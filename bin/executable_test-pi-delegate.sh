@@ -56,6 +56,8 @@ assert_not_contains() {
 }
 
 # Install a fake pi on PATH whose behaviour is selected by FAKE_PI_MODE.
+# Also installs a chezmoi stub (exits ${FAKE_CHEZMOI_STATUS:-0}, logs argv to
+# $FAKE_CHEZMOI_LOG when set) so tests never depend on real chezmoi state.
 install_fake_pi() {
 	local fake_bin="$SCRATCHPAD/fakebin-pi"
 	mkdir -p "$fake_bin"
@@ -81,6 +83,14 @@ crash)
 esac
 FAKE
 	chmod +x "$fake_bin/pi"
+	cat >"$fake_bin/chezmoi" <<'CHEZ'
+#!/usr/bin/env bash
+if [[ -n "${FAKE_CHEZMOI_LOG:-}" ]]; then
+	printf '%s\n' "$*" >> "$FAKE_CHEZMOI_LOG"
+fi
+exit "${FAKE_CHEZMOI_STATUS:-0}"
+CHEZ
+	chmod +x "$fake_bin/chezmoi"
 	export PATH="$fake_bin:$PATH"
 }
 
@@ -420,6 +430,72 @@ if [[ $run_status -eq 0 ]] &&
 else
 	fail "20 gpt-* routes to openai-codex" \
 		"status=$run_status stdout='$run_stdout' stderr='$run_stderr'"
+fi
+
+# --- 21. relative -o/--report and --heartbeat resolve against caller's cwd, not -C dir ---
+# A relative path on -o or --heartbeat must be interpreted in the directory from
+# which the wrapper was invoked, even when -C points elsewhere. This prevents the
+# report from landing inside the workdir (or a different file being truncated).
+# We follow the byte-identical pattern of case 14.
+caller21="$SCRATCHPAD/c21"
+other21="$SCRATCHPAD/o21"
+mkdir -p "$caller21" "$other21"
+install_fake_pi
+stdout_f="$(mktemp)"; stderr_f="$(mktemp)"
+set +e
+(cd "$caller21" && FAKE_PI_MODE=ok "$PI_DELEGATE" -C "$other21" -o rel.report --heartbeat rel.hb "do a thing") >"$stdout_f" 2>"$stderr_f"
+run_status=$?
+set -e
+run_stdout="$(cat "$stdout_f")"; run_stderr="$(cat "$stderr_f")"
+rm -f "$stdout_f" "$stderr_f"
+rep21="$caller21/rel.report"
+hb21="$caller21/rel.hb"
+printf 'final report\n' >"$SCRATCHPAD/expected21"
+if [[ $run_status -eq 0 ]] && cmp -s "$rep21" "$SCRATCHPAD/expected21" &&
+   [[ -f "$hb21" ]] &&
+   ! [[ -f "$other21/rel.report" ]] && ! [[ -f "$other21/rel.hb" ]]; then
+	pass "21 relative report/heartbeat resolve to caller cwd (not -C); files match expected, none in workdir"
+else
+	fail "21 relative report/heartbeat resolve to caller cwd (not -C); files match expected, none in workdir" \
+		"status=$run_status rep=$(ls -l $caller21/ 2>/dev/null || true) other=$(ls -l $other21/ 2>/dev/null || true) report='$(cat "$rep21" 2>/dev/null || true)'"
+fi
+
+# --- 22. FAKE_CHEZMOI_STATUS=1 prints the exact drift warning on stderr (real run) ---
+# The warning must appear when chezmoi verify fails, but must not change the
+# exit status of a successful run.
+install_fake_pi
+FAKE_CHEZMOI_STATUS=1 FAKE_CHEZMOI_LOG="$SCRATCHPAD/chezmoi22.log" run_pd -m glm-5.2 "do a thing"
+if [[ $run_status -eq 0 ]] &&
+   assert_contains "$run_stderr" "delegate: the installed delegate skill or wrappers differ from the chezmoi source. Review with 'chezmoi diff ~/.claude/skills/delegate ~/bin', then 'chezmoi apply' those paths."; then
+	pass "22 FAKE_CHEZMOI_STATUS=1 emits exact warning on stderr, exit remains 0"
+else
+	fail "22 FAKE_CHEZMOI_STATUS=1 emits exact warning on stderr, exit remains 0" \
+		"status=$run_status stderr='$run_stderr'"
+fi
+
+# --- 23. FAKE_CHEZMOI_STATUS=0 prints no drift warning ---
+# When verify would succeed (or no chezmoi), no warning line on stderr.
+install_fake_pi
+FAKE_CHEZMOI_STATUS=0 run_pd -m glm-5.2 "do a thing"
+if [[ $run_status -eq 0 ]] &&
+   assert_not_contains "$run_stderr" "delegate: the installed"; then
+	pass "23 FAKE_CHEZMOI_STATUS=0 prints no 'delegate: the installed' line"
+else
+	fail "23 FAKE_CHEZMOI_STATUS=0 prints no 'delegate: the installed' line" \
+		"status=$run_status stderr='$run_stderr'"
+fi
+
+# --- 24. dry-run never invokes chezmoi (no drift check side effects) ---
+# A dry run only prints the command; checking chezmoi there would print the drift
+# warning on every -n call. The log path goes on the run_pd line so the stub sees it.
+log24="$SCRATCHPAD/chezmoi24.log"
+FAKE_CHEZMOI_LOG="$log24" FAKE_CHEZMOI_STATUS=1 run_pd -n "do a thing"
+if [[ $run_status -eq 0 ]] && [[ ! -s "$log24" ]] &&
+	assert_not_contains "$run_stderr" "delegate: the installed"; then
+	pass "24 dry-run -n never calls chezmoi"
+else
+	fail "24 dry-run -n never calls chezmoi" \
+		"status=$run_status log='$(cat "$log24" 2>/dev/null || true)' stderr='$run_stderr'"
 fi
 
 echo

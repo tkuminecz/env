@@ -56,6 +56,8 @@ assert_not_contains() {
 }
 
 # Install a fake grok on PATH whose behaviour is selected by FAKE_GROK_MODE.
+# Also installs a chezmoi stub (exits ${FAKE_CHEZMOI_STATUS:-0}, logs argv to
+# $FAKE_CHEZMOI_LOG when set) so tests never depend on real chezmoi state.
 install_fake_grok() {
 	local fake_bin="$SCRATCHPAD/fakebin-grok"
 	mkdir -p "$fake_bin"
@@ -89,6 +91,14 @@ long)
 esac
 FAKE
 	chmod +x "$fake_bin/grok"
+	cat >"$fake_bin/chezmoi" <<'CHEZ'
+#!/usr/bin/env bash
+if [[ -n "${FAKE_CHEZMOI_LOG:-}" ]]; then
+	printf '%s\n' "$*" >> "$FAKE_CHEZMOI_LOG"
+fi
+exit "${FAKE_CHEZMOI_STATUS:-0}"
+CHEZ
+	chmod +x "$fake_bin/chezmoi"
 	export PATH="$fake_bin:$PATH"
 }
 
@@ -622,6 +632,59 @@ if [[ $status29 -eq 0 ]] && assert_contains "$stderr29" "report is only 13 bytes
 else
 	fail "29 short report warns without changing exit; long report stays quiet" \
 		"short status=$status29 stderr='$stderr29' long status=$run_status stderr='$run_stderr'"
+fi
+
+# --- 30. relative -o/--report resolves against caller's cwd, not -C dir ---
+# A relative -o must be interpreted in the directory from which the wrapper was
+# invoked, even when -C points elsewhere. The wrapper truncates the report before
+# it cds into -C and appends after, so an unresolved relative path splits the
+# report across two files and leaves the caller's copy empty.
+# Uses --sandbox off like other real-mode cases.
+caller30="$SCRATCHPAD/c30"
+other30="$SCRATCHPAD/o30"
+mkdir -p "$caller30" "$other30"
+install_fake_grok
+stdout_f="$(mktemp)"; stderr_f="$(mktemp)"
+set +e
+(cd "$caller30" && FAKE_GROK_MODE=ok TMPDIR="$SCRATCHPAD" "$GROK_DELEGATE" --sandbox off -C "$other30" -o rel.report "do a thing") >"$stdout_f" 2>"$stderr_f"
+run_status=$?
+set -e
+run_stdout="$(cat "$stdout_f")"; run_stderr="$(cat "$stderr_f")"
+rm -f "$stdout_f" "$stderr_f"
+rep30="$caller30/rel.report"
+printf 'final report\n' >"$SCRATCHPAD/expected30"
+if [[ $run_status -eq 0 ]] &&
+   assert_contains "$(cat "$rep30")" "final report" &&
+   ! [[ -f "$other30/rel.report" ]]; then
+	pass "30 relative report resolves to caller cwd (not -C); contains full stdout, none in workdir"
+else
+	fail "30 relative report resolves to caller cwd (not -C); contains full stdout, none in workdir" \
+		"status=$run_status rep=$(ls -l $caller30/ 2>/dev/null || true) other=$(ls -l $other30/ 2>/dev/null || true) report='$(cat "$rep30" 2>/dev/null || true)'"
+fi
+
+# --- 31. FAKE_CHEZMOI_STATUS=1 prints the exact drift warning on stderr (real run) ---
+# The warning must appear when chezmoi verify fails, but must not change the
+# exit status of a successful run.
+install_fake_grok
+FAKE_CHEZMOI_STATUS=1 FAKE_CHEZMOI_LOG="$SCRATCHPAD/chezmoi31.log" run_gd --sandbox off "do a thing"
+if [[ $run_status -eq 0 ]] &&
+   assert_contains "$run_stderr" "delegate: the installed delegate skill or wrappers differ from the chezmoi source. Review with 'chezmoi diff ~/.claude/skills/delegate ~/bin', then 'chezmoi apply' those paths."; then
+	pass "31 FAKE_CHEZMOI_STATUS=1 emits exact warning on stderr, exit remains 0"
+else
+	fail "31 FAKE_CHEZMOI_STATUS=1 emits exact warning on stderr, exit remains 0" \
+		"status=$run_status stderr='$run_stderr'"
+fi
+
+# --- 32. FAKE_CHEZMOI_STATUS=0 prints no drift warning ---
+# When verify would succeed (or no chezmoi), no warning line on stderr.
+install_fake_grok
+FAKE_CHEZMOI_STATUS=0 run_gd --sandbox off "do a thing"
+if [[ $run_status -eq 0 ]] &&
+   assert_not_contains "$run_stderr" "delegate: the installed"; then
+	pass "32 FAKE_CHEZMOI_STATUS=0 prints no 'delegate: the installed' line"
+else
+	fail "32 FAKE_CHEZMOI_STATUS=0 prints no 'delegate: the installed' line" \
+		"status=$run_status stderr='$run_stderr'"
 fi
 
 echo

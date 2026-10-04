@@ -34,7 +34,7 @@ session=""
 json_mode=0
 dry_run=0
 prompt=""
-timeout_mins=60
+timeout_mins=120
 # default 6: 3 false kills of healthy glm/deepseek runs (slow zero-CPU starts) in one
 # retro window; a true stall just gets caught 3min later, which is cheap by comparison
 stall_mins=6
@@ -61,7 +61,7 @@ Options:
                         cpu for this long, default 6; 0 disables. Exits 125.
                         This is the real hang detector — hung runs block on I/O
                         forever, healthy ones always burn cpu somewhere.
-  -T, --timeout <mins>  backstop cap on total runtime, default 60; 0 disables.
+  -T, --timeout <mins>  backstop cap on total runtime, default 120; 0 disables.
                         Catches slow-but-alive runaways. Exits 124.
   -o, --report <p>      tee the delegate's stdout (its final report) to this file
                         (default $TMPDIR/pi-delegate-<pid>.report). The full
@@ -149,6 +149,15 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
+# A relative -o or --heartbeat means the caller's directory. The wrapper cds into -C
+# before it opens either file, so pin them to absolute paths first.
+if [[ -n "$report" && "$report" != /* ]]; then
+	report="$PWD/$report"
+fi
+if [[ -n "$heartbeat" && "$heartbeat" != /* ]]; then
+	heartbeat="$PWD/$heartbeat"
+fi
+
 case "$model" in
 */*) provider="openrouter" ;;
 glm*) provider="zai" ;;
@@ -215,6 +224,18 @@ fi
 
 # Nothing else checks the retro trigger, so every real launch does (never fails the run).
 command -v delegate-retro-due >/dev/null 2>&1 && delegate-retro-due >&2 || true
+
+# The skill and wrappers reach each machine through chezmoi, and a source update that is
+# never applied leaves this host briefing from stale rules. Warn only; never fails the run.
+delegate_files=(
+	"$HOME/.claude/skills/delegate/SKILL.md" "$HOME/.claude/skills/delegate/brief-common.md"
+	"$HOME/bin/pi-delegate" "$HOME/bin/grok-delegate"
+	"$HOME/bin/delegate-retro-due" "$HOME/bin/delegate-brief-check"
+)
+if command -v chezmoi >/dev/null 2>&1 &&
+	! timeout 5 chezmoi verify "${delegate_files[@]}" >/dev/null 2>&1; then
+	echo "delegate: the installed delegate skill or wrappers differ from the chezmoi source. Review with 'chezmoi diff ~/.claude/skills/delegate ~/bin', then 'chezmoi apply' those paths." >&2
+fi
 
 # The Write/Edit tools have turned a "\u00a0" escape into a literal NBSP, and that shipped
 # straight into a delegate's test. Warn only; never fails the run.
