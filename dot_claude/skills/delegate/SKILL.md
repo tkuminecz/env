@@ -17,26 +17,33 @@ OpenRouter):
 
 | Model | `pi-delegate -m` | Best at (evidence) | Avoid for |
 |---|---|---|---|
-| **grok-4.6** | `grok-4.6` (default of both wrappers) | Default external workhorse and the strongest external **reviewer**: n≈11 review passes (3 logged reviewer-seat A's plus ~8 engine-wave calibration and PR-time reviews) — every finding real, file:line evidence, honest UNVERIFIED lists, and it caught the cross-surface seam class grok-4.5 once missed. **Builder reps: none yet** — the default rests on reviewer evidence plus being the grok CLI's own default; log the first builds. 500K ctx. | >500K context |
+| **grok-4.6** | `grok-4.6` (default of both wrappers) | Default external workhorse and the strongest external **reviewer**: n≈11 review passes (3 logged reviewer-seat A's plus ~8 engine-wave calibration and PR-time reviews) — every finding real, file:line evidence, honest UNVERIFIED lists, and it caught the cross-surface seam class grok-4.5 once missed. **Builder n=1** (tim-dev, 10-04): A on a ~690-line API package (since/until windows on six endpoints) in about 5 min, with mutation proofs on all four behaviours and an honest nine-item deviations list. 500K ctx. | >500K context |
 | **grok-4.5** | `grok-4.5` | Previous default. Observed: the log's primary lane, run through grok CLI (see Path 1b). Across 09-25→28 it ran 80 build lanes at 88% A/A-, and its B's were fallout in suites the brief never named, collateral from tools it ran, and fluent comments that said something false, never broken logic. On 09-28→29 it ran 42 lanes at 81% A/A-. The B's were judgment slips at the edge of the brief: it dropped a unique index inside a test transaction to seed a state the schema forbids, wrote through a `/tmp` symlink into a committed file, used a `TYPE_CHECKING`-only name at runtime (ty passed, the route 500'd), let frozenset order reach a retry digest, and shipped a table layout that only a screenshot could show was broken. brief-common now names each one. A 402 from x.ai is an outage for the rest of the day, not a transient. Salvage the tree and send the day's builds to glm, which went 2/2 A as the fallback on 09-25. Builder n=4 in the mgc ledger: A and B on a token-bucket A/B test, B and B as the journal impl seats (faithful to the contract; every escape sat where the contract was silent). Fallback when 4.6 throttles. **grok-4.7** is also on the sub with zero reps; **grok-4.3** remains the 1M-ctx fallback. | — |
-| **glm-5.3-flash** | `glm-5.3-flash` | **The most-repped external builder (n=22).** 20 mgc lanes 09-13→09-25: A 1 · A− 4 · B+ 6 · B 6 · C+ 3, and all three C+'s were floor misses caused by the pricing instrument, not the builder. It got better as the briefs got better: the last six (planned by Opus 5/5.5 with every edit site anchored to file:line, rows capped under 400 cards) went A, A−×3, B+, B. Typical result: B+ after one review+fix round. | Program-sized builds (≳3k changed lines): it hit the 6 h lane cap once and a z.ai 429 mid-lane once. See "Size line" below |
-| **glm-5.3** | `glm-5.3` | n=17. Engine waves as long herdr lanes at thinking high: B by default, A− once from a decisions-of-record brief. Slow: 4–7 h per lane with commit 1 at 2–4 h, about 3× an Opus lane. Non-engine cross-surface work: A (2/2). Greenfield toolchain setup: B (lifecycle gaps, see brief template). It is also the mgc loop's default reviewer, but **its reviews timed out twice on a 7,184-line diff**. | Reviews of diffs >~3k lines; engine waves where wall time matters (flash and deepseek-v4.1-flash reach the same grade faster) |
-| **glm-5.2** | `glm-5.2` | Blind pin batteries with a verbatim corpus, mutation proofs and the deviations clause: **n=13, 85% A**. Docs from a verified facts sheet: A. Repo-scale long context (usable 1M, its headline feature). Iterative run-test-fix loops: it does measurably better when told to execute and self-verify. It checks premises as well as grok-4.5 does and flags a false brief premise with evidence instead of applying it, so it makes a strong premise-sweep, docs-truth and verification-sweep delegate. It is the log's best blind RED unit-suite writer. It invented the `/tmp` scratch-implementation mutation proof, and its seven RED suites on 09-25→28 graded six A and one B+, where the B+ was a contract gap it flagged itself. On read-only panels it often sits near zero CPU for 10–30m and then lands the round's unique real finding (a strand-PENDING design flaw, a CRITICAL red CI read off the live run, the detached-worktree venv trap). Run those lanes at `-W 20` and don't gate on them. It doesn't refuse security-adjacent tasks, and it was the build fallback when x.ai ran out of credit (2/2 A). Docs caveat: it drifts on the *semantics* of code it summarizes secondhand, so put the exact wording for contract-bearing bullets in the brief. **z.ai stalls are its one recurring failure**, at about one lane per heavy day (09-24, 09-25, 09-26, 09-28). Stalled runs sit at zero CPU, sometimes minutes after a clean smoke or a clean start. Stagger glm launches 150s–3m apart, because simultaneous launches stall. After two strikes in a day, drop z.ai for the rest of the day for every lane the round waits on (builds, RED writers, gating reviews). Non-gating read-only lanes at `-W 20` may still launch, since a stall there costs nothing. A smoke only rules the provider *out*, never in. Salvage a killed build before relaunching it, and read the code under any comment it wrote: on 09-28 a stalled dbt lane left a comment claiming a column move it never made. | Cross-file reasoning — quality wobbles when correctness spans many files (kilo.ai eval); use grok-4.5 or Claude there. Integration-heavy RED suites (a full Trino tier): give glm the unit tier and send the integration tier to grok CLI (missed twice: JUS-3012 F, JUS-2408 B) |
-| **codex-luna** | `gpt-5.6-luna -t xhigh` | **Fixer, finisher and reviewer.** Finished two GLM lanes cut off by the 6 h cap or a z.ai 429; its fix rounds on two more came back clean on re-review; as an own-review seat it re-derived headline numbers and caught real measurement defects. **As a builder, n=3: B, B+, C+, and it skipped the verification gate on 2 of the 3** (opened PRs after plain `cargo test`; one shipped 31 regressions). | Building without a mechanical gate that refuses to open the PR on a regression |
+| **glm-5.3-flash** | `glm-5.3-flash` | **The most-repped external builder (n=22).** 20 mgc lanes 09-13→09-25: A 1 · A− 4 · B+ 6 · B 6 · C+ 3, and all three C+'s were floor misses caused by the pricing instrument, not the builder. It got better as the briefs got better: the last six (planned by Opus 5/5.5 with every edit site anchored to file:line, rows capped under 400 cards) went A, A−×3, B+, B. Typical result: B+ after one review+fix round. **09-26→10-04:** all four mgc program-9 builds (105–260 cards advanced, under the 400 line) hit the 6 h cap while still progressing, and Opus finished each one (A−, A−, B+, plus one moved). The one cheap program build that finished in one run was the smallest row (deck-weighted 32): A. On tim-dev: implement-to-a-reviewed-suite A (byte-identical to a reference on 812 blocks), a small dbt package A−, and one **C**: to make a mutation proof fire, it changed a behaviour the brief pinned (a 20k-case fuzz found 123 wrong results), and its report claimed a clean typecheck over 11 errors. | Program rows in mgc beyond the smallest (see "Size line"); trusting its gate lines without a re-run |
+| **glm-5.3** | `glm-5.3` | n=17. Engine waves as long herdr lanes at thinking high: B by default, A− once from a decisions-of-record brief. Slow: 4–7 h per lane with commit 1 at 2–4 h, about 3× an Opus lane. Non-engine cross-surface work: A (2/2). Greenfield toolchain setup: B (lifecycle gaps, see brief template). It is also the mgc loop's default reviewer, but **its reviews timed out twice on a 7,184-line diff**. **Service packages (tim-dev reader, 09-26→27, n=4): B every time, and every time with one must-fix that only an adversarial opus review found**: a login rate limit bypassable by rotating `X-Forwarded-For`, a semaphore around Restate `ctx.run` that leaked a slot per failed attempt, an abort handler whose synchronous dispatch spawned 392 workers, and tests that left 6 mutants alive. One fix round with mutation proofs closed each. Broad and faithful to the contract, weak on failure paths and attackers. | Reviews of diffs >~3k lines; engine waves where wall time matters (flash and deepseek-v4.1-flash reach the same grade faster); shipping a service package without an adversarial opus review |
+| **glm-5.2** | `glm-5.2` | Blind pin batteries with a verbatim corpus, mutation proofs and the deviations clause: **n=15, 12 A / 3 B**. The newest B (reader 3a): 2 of 26 blind tests failed a correct implementation, because they encoded wrong beliefs about a library's API. Running the suite against a throwaway reference implementation found both in about 15 min (see TDD split). Docs from a verified facts sheet: A. Repo-scale long context (usable 1M, its headline feature). Iterative run-test-fix loops: it does measurably better when told to execute and self-verify. It checks premises as well as grok-4.5 does and flags a false brief premise with evidence instead of applying it, so it makes a strong premise-sweep, docs-truth and verification-sweep delegate. It is the log's best blind RED unit-suite writer. It invented the `/tmp` scratch-implementation mutation proof, and its seven RED suites on 09-25→28 graded six A and one B+, where the B+ was a contract gap it flagged itself. On read-only panels it often sits near zero CPU for 10–30m and then lands the round's unique real finding (a strand-PENDING design flaw, a CRITICAL red CI read off the live run, the detached-worktree venv trap). Run those lanes at `-W 20` and don't gate on them. It doesn't refuse security-adjacent tasks, and it was the build fallback when x.ai ran out of credit (2/2 A). Docs caveat: it drifts on the *semantics* of code it summarizes secondhand, so put the exact wording for contract-bearing bullets in the brief. **z.ai stalls are its one recurring failure**, at about one lane per heavy day (09-24, 09-25, 09-26, 09-28). Stalled runs sit at zero CPU, sometimes minutes after a clean smoke or a clean start. Stagger glm launches 150s–3m apart, because simultaneous launches stall. After two strikes in a day, drop z.ai for the rest of the day for every lane the round waits on (builds, RED writers, gating reviews). Non-gating read-only lanes at `-W 20` may still launch, since a stall there costs nothing. A smoke only rules the provider *out*, never in. Salvage a killed build before relaunching it, and read the code under any comment it wrote: on 09-28 a stalled dbt lane left a comment claiming a column move it never made. | Cross-file reasoning — quality wobbles when correctness spans many files (kilo.ai eval); use grok-4.5 or Claude there. Integration-heavy RED suites (a full Trino tier): give glm the unit tier and send the integration tier to grok CLI (missed twice: JUS-3012 F, JUS-2408 B) |
+| **codex-luna** | `gpt-5.6-luna -t xhigh` | **Fixer, finisher and reviewer.** Finished two GLM lanes cut off by the 6 h cap or a z.ai 429; its fix rounds on two more came back clean on re-review; as an own-review seat it re-derived headline numbers and caught real measurement defects. **As a builder, n=3: B, B+, C+, and it skipped the verification gate on 2 of the 3** (opened PRs after plain `cargo test`; one shipped 31 regressions). From 10-02 to 10-04 every Codex call failed with "Unable to verify … access", which was an account problem, not a transient, and lasted until Tim fixed it. Tim's fallback order when Anthropic usage binds (mgc, 10-02): GLM → Luna → DeepSeek. Related: **gpt-6-luna** (via OpenRouter, paid) n=1, C. It was fast and honest that it had skipped its mutation proofs. Its tests were too thin to fail, a real input file exposed two bugs its handcrafted fixtures hid, and it then hung silently for 39 min. | Building without a mechanical gate that refuses to open the PR on a regression |
 | **deepseek-v4.1-flash** | `deepseek/deepseek-v4.1-flash` (OpenRouter) | Fastest external engine builder: three engine lanes B+×3 (plus one measurement lane A−), about 2 h 45 m kickoff-to-merge against 4–7 h for glm-5.3. It fails the same way at every commit 1: **claims run ahead of pins** (numbers and wire claims stated before the test that proves them exists). The calibration review is load-bearing for it. | Shipping without a calibration review |
 | **deepseek-v4-pro-0813** | `deepseek/deepseek-v4-pro-0813` (OpenRouter) | Small measurement and CI lanes: A 2/2, fast, corrected an ADR's own number. | Engine waves (no reps) |
-| **deepseek-v4-flash-0731** | `deepseek/deepseek-v4-flash-0731` (OpenRouter) | **Corroboration lane**, pay-per-token via OpenRouter (cheap, not free). Reviewer for small diffs: A on diffs ≤~500 lines; F at ~2,400 (hung twice with zero output). On panels and sweeps it confirms the other models' findings and lands a unique real one about every other run (a missed ci-config dep, an untested join, an unaliased `a + b` that parses as `b`, a preview count that used its own blank predicate, proven with a probe). Its reports are thinner. It has called authz OK where it wasn't, and it has reported "no correctness issues" on diffs where opus found a design-changing defect. **Its HIGHs are unreliable**: on 09-25 two of its headline findings were false (a `.wait()` it said never raises, and a Directory test cited against the SDK file). Verify every deepseek HIGH by content before it enters a fix list. Never trust its line cites, which drift by up to 200 lines. Slow zero-CPU starts (5–7m) look like hangs, so give it `-W 20` and never gate a round on it. Panel grades 09-22→29 were mostly B and B+, with two C's. The second C (09-28, JUS-2267) was again a false HIGH: it said a mapped lake office id is `cfo_` when the proto says `lfo_`. The same day its unique finding on a firm-profile sweep (an ungated email on the approved-rates rung) became a plan decision. Its second lane is spec-driven test writing and small, fully specified builds, where thin prose and drifting cites don't bind. It went A on a RED integration suite, on blind RED unit suites, and on a relationship-removal package (09-28). About half its F's were runs that never started, so a build goes to deepseek only when something else can absorb its loss. The provider itself flakes some days (hangs, upstream closed). As a builder it went B− once when it lost 2 h 20 m wedged on a gated `rm -r`. | Big-diff reviews; sole coverage of any surface — never the only model on a package; high-stakes or judgment-heavy work; anything where citation precision matters |
+| **deepseek-v4-flash-0731** | `deepseek/deepseek-v4-flash-0731` (OpenRouter) | **Corroboration lane**, pay-per-token via OpenRouter (cheap, not free). Reviewer for small diffs: A on diffs ≤~500 lines; F at ~2,400 (hung twice with zero output). On panels and sweeps it confirms the other models' findings and lands a unique real one about every other run (a missed ci-config dep, an untested join, an unaliased `a + b` that parses as `b`, a preview count that used its own blank predicate, proven with a probe). Its reports are thinner. It has called authz OK where it wasn't, and it has reported "no correctness issues" on diffs where opus found a design-changing defect. **Its HIGHs are unreliable**: on 09-25 two of its headline findings were false (a `.wait()` it said never raises, and a Directory test cited against the SDK file). Verify every deepseek HIGH by content before it enters a fix list. Never trust its line cites, which drift by up to 200 lines. Slow zero-CPU starts (5–7m) look like hangs, so give it `-W 20` and never gate a round on it. Panel grades 09-22→29 were mostly B and B+, with two C's. The second C (09-28, JUS-2267) was again a false HIGH: it said a mapped lake office id is `cfo_` when the proto says `lfo_`. The same day its unique finding on a firm-profile sweep (an ungated email on the approved-rates rung) became a plan decision. Its second lane is spec-driven test writing and small, fully specified builds, where thin prose and drifting cites don't bind. It went A on a RED integration suite, on blind RED unit suites, and on a relationship-removal package (09-28). About half its F's were runs that never started, so a build goes to deepseek only when something else can absorb its loss. The provider itself flakes some days (hangs, upstream closed). As a builder it went B− once when it lost 2 h 20 m wedged on a gated `rm -r`. As an mgc builder (09-28) it timed out at 6 h with 7 of 9 cards done, and Opus finished the lane (B+). The next lane hit a provider error mid-run. | Big-diff reviews; sole coverage of any surface — never the only model on a package; high-stakes or judgment-heavy work; anything where citation precision matters |
 | **grok-build-0.1** | `grok-build-0.1` | The mechanical lane: small scripted edits and wide fan-outs of tiny packages, 100+ tok/s, 256K ctx. **pi could not call it until 2026-09-26**: pi sent a reasoning parameter the model rejects (HTTP 400), which helps explain zero rows across three retros. Fixed by registering it with `"reasoning": false` in `~/.pi/agent/models.json` (chezmoi-managed). **First reps (09-26): two wrapper fixes with bash test suites, B and B.** It took ~4.5 min per package; the code and mutation proofs were correct, and one fix round each (1.5–2.5 min) landed every item. It also has the usual weaknesses: its test comments narrated the change, and it built a PATH-filter test that would break once bubblewrap is installed (my brief suggested the approach; it didn't flag the risk). Earlier log (6 rows, none since 08-20): on genuinely tiny mechanical packages it is an A (gate registration, 4m). Its failure is always the same phase — **the edits land, the report doesn't**: false "ruff clean" on a ruff-failing file, silently dropped coverage, and a sweep that went byte-complete then burned 15s of CPU in 39min and died in verify. grok-4.5 @ grok CLI finishes the same tiny packages in 1–3m at A with a report you can trust. Reflex-route mechanical work here, size the package small, and plan to re-run its gates and salvage its output yourself. | Anything needing judgment; anything gated by a hard external constraint CI can't see (see *Done means*); anything where you would actually rely on the report |
 | **gpt-6-sol** (Tim's pick) | `pi` interactive in a herdr pane, provider `openai-codex` (pi's current default provider) | Whole-ticket, long-horizon implementation handoffs that Tim chooses to run interactively. Two rows so far (JUS-3071, JUS-3074: 4.5h and 6h, both B). It takes mid-run steers well and keeps to the spec's shape. Without brief-common its tests went vacuous: a memory bound read from a process-lifetime high-water mark, a fail-open test that couldn't fail, and structural guards left pinning dead constant copies. Review it like a first draft and mutation-test its suite. pi can switch models mid-run when the provider rate-limits. On JUS-3071 sol handed over to deepseek-flash at 01:53, so check the pane footer, because the model that actually wrote the code sets how deep the review goes. | Unattended runs; anything the routing table would pick. It is not in the delegate-by-default rotation |
 
-**Size line (from 43 graded mgc lanes).** The 20 Opus-built lanes (4.8 ×3, 5 ×16, 5.5 ×1) graded
-A 4 · A− 10 · B+ 3 · B 3, with **zero C**, even though Opus got the *widest* rows, which makes the
-comparison conservative. External builders did well on rows under about 400 cards or 3k changed
-lines. Above that they hit lane caps, 429s and review timeouts (GLM), or skipped the gate (Codex).
-Tim's mgc calls follow this: on 09-20, split by size; on 09-25, every lane step onto Opus 5.5 at
-high effort for rounds 14–15, noting the Claude sub is flat-rate too. Rule: **program-sized builds go to Opus** unless
-Anthropic usage is the binding limit. In that case use Codex Luna behind a mechanical gate, with
-GLM-flash taking the small rows.
+**Size line (mgc ledger, 66 graded lanes to 10-04).** Opus has built 35 lanes with **zero C**,
+even though it got the *widest* rows. The first 20 (4.8 ×3, 5 ×16, 5.5 ×1) graded A 4 · A− 10 ·
+B+ 3 · B 3, and the 15 Opus 5.5 lanes of 09-26→28 graded A 9 · A− 6. The old line ("external
+builders do well under about 400 cards or 3k changed lines") did not hold for mgc *program* rows.
+From 09-27, all four GLM-flash program builds at 105–260 cards advanced hit the 6 h cap while
+still progressing, and so did a 9-card DeepSeek deck lane. The one cheap program build that
+finished in one run was the smallest row (deck-weighted 32). Rule: **program-sized builds go to
+Opus** unless Anthropic usage is the binding limit. When it binds, Tim's call (10-02) is GLM-flash
+→ Codex Luna → DeepSeek with a 10 h cap, because every cheap build cut off at 6 h was still
+making progress.
+**Don't switch a lane's builder mid-build unless the lane is dead.** The eight lanes that changed
+builder graded A− 4 · B+ 4 with no A, and one of them needed four merges. The sixteen lanes with
+a single builder got ten A's. Open question: those cheap builds ran three at a time on one z.ai
+sub (PARALLEL-BUILDS=3 from 09-26). One paired rep, the same row built alone, would show whether
+the shared sub or the rows themselves made them slow.
 
 Escalate back to **Claude subagents** (per CLAUDE.md routing) when the task holds open-ended judgment, needs conversation context, or must integrate with Agent-tool machinery (structured output schemas, worktree isolation, background notifications).
 
@@ -239,8 +246,12 @@ TDD-split mechanics (applies to the first class; step 0 covers the second):
 
 1. **Delegate A** writes the failing test suite from the spec alone — blind to any
    implementation. Tests-as-contract.
-2. **Claude reviews the tests** (cheap: read one file against the spec; mutation-test if the
-   suite guards something subtle).
+2. **Claude reviews the tests**: read the file against the spec, then run the suite against a
+   throwaway reference implementation of the contract. Reading finds missing cases. The
+   reference run finds tests that would fail a *correct* implementation, which reading misses:
+   2 of 26 on reader 3a, both wrong beliefs about a library's API. The run takes about 15 min.
+   For a pure algorithm, keep the reference afterwards and fuzz the delegate's implementation
+   against it. On reader 3d that found 123 wrong results in 20k cases behind a green suite.
 3. **Delegate B** implements to green against A's suite, forbidden from editing the tests
    (fence it in the brief; test edits go in the deviations report for Claude to judge).
 
@@ -300,7 +311,8 @@ cd <workdir> && pi -p --no-session -ne --thinking low \
   - **kills the group after 6 minutes of zero tree-CPU** (`-W/--stall <mins>`, `0` disables;
     was 3, raised after three false kills of slow-starting glm/deepseek runs) and
     exits `125` with a `HUNG` explanation;
-  - keeps a 60min total-runtime backstop (`-T/--timeout`, exit `124`) for slow-but-alive runaways;
+  - keeps a 120min total-runtime backstop (`-T/--timeout`, exit `124`) for slow-but-alive runaways.
+    It was 60, until a live glm-5.3 fix round ran past 60 min and had to be resumed (reader 3c);
   - writes every sample to a **heartbeat file**, path echoed to stderr at launch.
 
   So the answer to "is it alive?" is always one second away — `tail -3 <heartbeat>`: `dcpu>0` and
@@ -610,7 +622,17 @@ For delegations bigger than a one-shot (a feature, a rebuild, parallel packages)
        JUS-3119's scientific-notation check was tested on String frames. The real CSV reader
        types the column Float64 first, so every tier was green and the feature never fired.
        The next RED brief carried the rule and caught the Excel reader's int-vs-float split up
-       front.
+       front. **Parsers and importers** get the same rule, applied to a real input file:
+       require one real-world input as a fixture. A Gutenberg seeder's handcrafted fixtures
+       hid both of its real bugs (every `rdf:value`, MIME types included, became a tag, and
+       table-of-contents lines became dozens of empty chapters), and one real book showed them.
+     - **Security-adjacent packages** (sign-in, sessions, rate limits, API keys): put an
+       attacker's list in the brief. It covers spoofed `X-Forwarded-For`, account enumeration,
+       in-memory stores that never free entries, secrets reaching logs, and echoed password
+       prompts. Warn that the test harness may hide the attack: under vitest, Better Auth saw
+       every client as 127.0.0.1 and skipped its origin check, so a bypassable login rate limit
+       passed every test (reader 3c). Then send the diff to an adversarial opus review, per
+       CLAUDE.md's security rule.
      - **Seeded test worlds**: check the brief's premise against the schema's uniqueness and
        FK constraints before you write it. A premise the schema forbids got "satisfied" by
        dropping an index inside the test transaction (JUS-3132). Require literal pins on the
@@ -663,8 +685,14 @@ For delegations bigger than a one-shot (a feature, a rebuild, parallel packages)
      shutdown with open streams or in-flight requests; one throwing or async subscriber
      isolated from the publisher; a stale async response arriving after a newer one; tasks the
      runner executes in parallel that must be ordered; test resources shared per file vs per
-     test; pool/listener error handlers. Both app builds this batch (the journal UI, reader
-     step 1) shipped green with defects from this list.
+     test; pool/listener error handlers; an abort, timeout or exit handler that starts new work
+     inside the same synchronous dispatch; leaving a page and coming back inside a client cache
+     window, not just a reload. Both app builds of the 09-02 batch (the journal UI, reader step 1)
+     shipped green with defects from this list, and so did three reader packages on 09-26→27: a
+     400-chapter abort that spawned 392 workers in one dispatch, a router cache that restored the
+     first visit's position, and a refresh in one field that overwrote another field's pending
+     save. Pools and state machines also need a spawn-count or in-flight-count test from the
+     start. Timing tests need wide margins and a warm-up, and the brief should spell both out.
    - *Long lanes* (anything past ~1 h): commit the first slice early (lanes that chased a full
      battery mid-loop went 4 h with no commit); run only the touched test targets in the loop
      and the full battery at most twice; when done or waiting on a verdict, **stop and idle —
@@ -696,6 +724,15 @@ For delegations bigger than a one-shot (a feature, a rebuild, parallel packages)
    - **Diffs over ~3k changed lines: opus, grok-4.6 or Codex Luna** — glm-5.3 reviews timed out twice at 7,184 lines, and deepseek-flash hung at 2,400.
    - **Small fix-loop diffs (≲500 lines): deepseek-v4-flash-0731** is the cheap reviewer.
    - **Standing focus hints**, beyond your own: numbers that don't sum or weren't pasted from a command; claims without a pin in the same commit; a widened row reaching an old combinator; lifecycle and concurrency sequences nobody wrote down.
+   - **The reviewer picks its own mutations.** The builder's mutations and the brief's mutations both
+     miss things. On reader 2a every briefed proof passed, and the opus reviewer's own mutations
+     still left six survivors. One test changed its subject in the "before" step, and a "paged"
+     test fit on one page. On reader 3d a mis-specified brief mutation pushed the builder to
+     change behaviour until the proof fired. Ask the reviewer for 5–10 mutations at the riskiest
+     branches, and treat each survivor as a finding.
+   - **Re-run every gate the report claims, and gate on the command's own exit code.** A
+     "typecheck: no errors" line sat over 11 errors (reader 3d). Separately, a merge gate that
+     piped the check through `grep` tested grep's status and let those errors through.
 
    **Put comment truth on every review's focus list.** In the 09-25→28 window it was the most common thing review caught, in eight rows
    across grok, glm and both gpt-6-sol handoffs. Examples: a docstring saying a size guard ran before FastAPI parsed the
@@ -717,7 +754,9 @@ For delegations bigger than a one-shot (a feature, a rebuild, parallel packages)
 
 ## Scorecard: log every delegation
 
-`LOG.md` next to this file is the calibration record — it travels with the skill. After each
+`LOG.md` next to this file is the calibration record. **It is per machine**: chezmoi seeds it
+once (`create_LOG.md`) and never syncs it, so tim-dev and jb-dev each keep their own, and their
+findings meet only in this file's shared source (see the retro's sync step). After each
 delegated task finishes its pipeline (including one-shots), append a row **at the end of the
 file** (the table is the file's last section, so an append lands in it): date, task, model @
 harness, grade (**A** merged as-is / **B** minor fixes / **C** major rework / **F** discarded),
@@ -811,6 +850,17 @@ Gotchas, all confirmed by running them:
 Tell the user the workspace label and that it's running unfocused, so they can attach
 (`herdr agent attach delegate-retro`) and take it over if they want a say in the routing changes.
 
+**Before step 1, sync the shared source.** Two machines run this retro against one chezmoi
+source, and each one only sees its own `LOG.md`. The 09-26 tim-dev retro never saw jb-dev's
+four retros from 09-22 to 09-25. When the two were merged on 09-29, nobody applied the merge on
+tim-dev, so tim-dev ran the old skill until 10-04. In that time its reader briefs went out
+without `brief-common.md`, and one OpenRouter run hung silently for 39 min, where the CPU
+watchdog would have killed it at 6. So start with `chezmoi git pull`. Then run
+`chezmoi diff ~/.claude/skills/delegate ~/.claude/CLAUDE.md ~/bin` and apply the delegate paths,
+after checking that the diff drops no local-only edit. Finish by committing and pushing the
+source, so the other machine's next retro starts from yours. Since 10-04 both wrappers warn at
+launch when the installed skill or wrappers differ from the source.
+
 Ask these, in order, against the rows since the last retro **and** the project-ledger rows
 since the same date:
 
@@ -840,7 +890,9 @@ Then act — a retro that only writes findings is a wasted retro:
 - edit the delegate-by-default / don't-delegate lists in `~/.claude/CLAUDE.md` (chezmoi source
   `dot_claude/CLAUDE.md` — edit there, then `chezmoi apply` that path, or the next apply reverts it)
 - promote repeated observations into **Distilled patterns** and prune the raw rows they came from
-- set `retro-state` to today's date, and append a one-line retro entry recording what changed
+- set `retro-state` to `last=<today> base=<N>` (see above), and append a one-line retro entry
+  recording what changed
+- commit and push the chezmoi source (see the sync step)
 
 Early on the log is thin and every row moves the picture; once patterns stabilize, prune
 aggressively — the log should stay a page, not an archive. Pruned rows move verbatim to
@@ -858,6 +910,12 @@ so a later retro can re-grade from the raw record.
 - **Long background runs can be killed by the parent harness** (a grok-4.6 review died mid-run, cause unknown). Launch long runs detached (`nohup`/`setsid`) with a completion monitor.
 - **Idle reapers kill silent steps.** A runner's 12-minute idle reap killed GLM lanes during a silent 50-minute test batch (the queohoh fork now waits 60 minutes). Any watchdog on a delegate must allow for its longest silent step.
 - **grok CLI: no sandbox without bubblewrap, and it signs out.** See Path 1b.
+- **A merged source is not an installed skill.** A `git pull` or merge in the chezmoi source
+  changes nothing under `~/.claude` or `~/bin` until `chezmoi apply` runs. That has happened
+  twice (07-27, and 09-29→10-04 on tim-dev), so the wrappers now print
+  `delegate: the installed delegate skill or wrappers differ from the chezmoi source` at
+  launch. When that line appears, look at `chezmoi diff` and apply the delegate paths before
+  you write the next brief.
 - **Waiters that match themselves.** `pgrep -f grok-delegate` or `pkill -f <pattern>` matches
   the waiter's own command line, and that bit two rounds. Use `pgrep -f 'grok-delegat[e]'`.
 - **grok CLI can exit 0 with only a preamble** in plain output mode. It captures a

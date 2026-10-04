@@ -37,6 +37,10 @@ explicitly overrides one of them, follow the brief.
   full worktree, which has filled this host's disk.
 - Never symlink from a scratch copy into the repo. Copy the file. A write through one such
   symlink replaced a committed 1155-line `dev.env` with a single line.
+- Any script you write that writes to a database (a seeder, a perf script, a backfill) first
+  checks which database it is connected to (`SELECT current_database()` or the equivalent)
+  and refuses anything but the test database. A perf script once ran against the real database
+  because it was given a `DATABASE_URL` with a query string.
 
 ## Stop conditions
 
@@ -52,6 +56,10 @@ explicitly overrides one of them, follow the brief.
 - If the test state the brief describes can only be seeded by dropping or altering a
   constraint, an index or a trigger, the schema forbids that state and the premise is false.
   STOP and report it. Never change the schema inside a test to make a scenario possible.
+- If a mutation leaves every test green, report it as a test gap, or as a mutation that can't
+  reach the code. Never change the behaviour the brief specifies just so a proof fires. A
+  builder once moved where a distance was measured to make its proof go red. That broke 123 of
+  20k fuzzed cases, and the suite stayed green.
 
 ## Permanent files: vocabulary and truth
 
@@ -124,6 +132,9 @@ Traps that no gate here catches:
   the type the reader actually produces.
 - A seeded test world pins the absolute count of every table it seeds, not only the deltas
   under test. When both sides of a comparison go wrong together, the deltas cancel.
+- A before/after test must not change the thing under test in its "before" step, or the
+  "after" assertion can pass for the wrong reason. A test that claims to cover paging needs
+  fixtures that fill at least two pages.
 
 If you notice an issue in your own output, fix it or argue it in the deviations report.
 Don't just mention it.

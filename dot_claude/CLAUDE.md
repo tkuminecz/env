@@ -109,9 +109,10 @@ default — decompose for width first, not a sequential plan with a couple of de
   lane for that part
 - final judgment calls: what to ship, what to tell Tim, whether a review finding is real
 - program-sized builds (≳3k changed lines or a whole subsystem): Opus builds those. In the mgc
-  ledger, 20 Opus-built lanes had zero C grades; external builders at that size hit lane caps,
-  429s and review timeouts, or skipped the gate. Use external only when Anthropic usage is the
-  binding limit, and then behind a mechanical gate (skill: "Size line")
+  ledger, 35 Opus-built lanes had zero C grades. External builders at that size hit lane caps,
+  429s and review timeouts, or skipped the gate, and on mgc program rows even 105–260-card rows
+  ran past the 6 h cap. Use external only when Anthropic usage is the binding limit, and then
+  behind a mechanical gate (skill: "Size line")
 
 Two wrappers on PATH, both dry-runnable with `-n`, never hand-composed flags: **`grok-delegate`**
 for unattended grok package builds via the grok CLI — **now the primary and best-graded
@@ -125,7 +126,7 @@ first tim-dev reps 2026-09-26), quick one-shots, and fix loops. It bakes in the 
 `--thinking low`, re-adds the permission-gate extension that `-ne` strips, derives the provider
 from the model name, and **watchdogs the run by CPU**: the delegate gets its own process group,
 tree-CPU is sampled every 20s to a heartbeat file, and a tree burning zero CPU for 6min is killed
-as hung (exit 125; 60min backstop cap = 124). `tail -3 <heartbeat>` answers "is it alive?" in a
+as hung (exit 125; 120min backstop cap = 124). `tail -3 <heartbeat>` answers "is it alive?" in a
 second — check it early rather than waiting on a notification that never comes for a hang. Load
 the `delegate` skill for
 the full playbook (brief template, decompose-for-delegation, worktree pipeline, review step,
