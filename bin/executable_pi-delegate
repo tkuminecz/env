@@ -222,15 +222,12 @@ if ((dry_run)); then
 	exit 0
 fi
 
-# Nothing else checks the retro trigger, so every real launch does (never fails the run).
-command -v delegate-retro-due >/dev/null 2>&1 && delegate-retro-due >&2 || true
-
 # The skill and wrappers reach each machine through chezmoi, and a source update that is
 # never applied leaves this host briefing from stale rules. Warn only; never fails the run.
 delegate_files=(
 	"$HOME/.claude/skills/delegate/SKILL.md" "$HOME/.claude/skills/delegate/brief-common.md"
 	"$HOME/bin/pi-delegate" "$HOME/bin/grok-delegate"
-	"$HOME/bin/delegate-retro-due" "$HOME/bin/delegate-brief-check"
+	"$HOME/bin/delegate-brief-check"
 )
 if command -v chezmoi >/dev/null 2>&1 &&
 	! timeout 5 chezmoi verify "${delegate_files[@]}" >/dev/null 2>&1; then

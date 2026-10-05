@@ -1,12 +1,11 @@
 # Delegation scorecard
 
-<!-- retro-state: last=2026-08-10 rows_since=0 -->
+<!-- retro-state: last=2026-08-10 base=0 -->
 
 One row per delegated task, appended when its pipeline finishes. Grades: **A** merged as-is · **B** merged after minor fixes · **C** needed major rework · **F** discarded/redone by hand. Review col = findings the builder's own verification missed.
 
-Retro fires at `rows_since` = 5, or 14 days past `last` with at least one new row — but never
-auto-fires within 1 day of `last` (rows accumulate through the cooldown) — see SKILL.md
-"Retro". Bump `rows_since` with every row you append; reset both fields when a retro runs.
+Retros run only when Tim asks (`/delegate retro`); nothing triggers one automatically. `base` is
+the number of dated table rows the last retro left behind, so every row past it is new.
 
 **The rows table is the LAST section of this file — append new rows to the bottom of the
 table, which is the bottom of the file.** (Two retros in a row found rows appended in the

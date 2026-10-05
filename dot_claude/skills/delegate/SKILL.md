@@ -777,78 +777,10 @@ benchmarks, and the table above is downstream of it.
 
 ## Retro: keep the approach improving
 
-Two triggers, whichever comes first — **5 new rows** since the last retro, or **14 days** with
-at least one new row — **gated by a 1-day cooldown**: never auto-fire within 1 day of `last`,
-however many rows pile up (a heavy fan-out day can log 5+ rows in hours; rows just accumulate
-until the cooldown lapses). On demand: `/delegate retro` — runs regardless of cooldown.
-
-**Count the rows, never a stored counter.** `LOG.md`'s `retro-state` header carries
-`last=<date> base=<N>`, where `N` is the number of table rows the retro left behind after
-compressing. New rows are the table count minus `base`. `N` is written once, by the retro,
-from a `grep -c`, so it can't drift the way the old hand-bumped counter did. That counter
-undercounted five windows running (7 vs 19, 9 vs 40, 8 vs 14; on tim-dev 6 for 13, then 12 for
-21) because fan-outs append in bursts. Dates alone don't work either. The 09-22 retro closed
-mid-day, and the 15 rows logged after it that day never counted (the trigger said 8 when the real number was 23). When a retro
-ends, set `base` to `grep -cE '^\| [0-9]{4}-' LOG.md`, leaving out any rows other sessions
-appended while the retro ran. Nobody reviewed those, and two landed during the 09-28 retro.
-
-Without a `base`, count the rows dated after `last` (`delegate-retro-due` falls back to the same):
-
-```sh
-awk -F'|' -v last="$(grep -o 'last=[0-9-]*' ~/.claude/skills/delegate/LOG.md | cut -d= -f2)" \
-  '$2 ~ /^ 20[0-9][0-9]-/ && substr($2,2,10) > last' ~/.claude/skills/delegate/LOG.md | wc -l
-```
-
-Rows in the project ledgers count toward the trigger too.
-
-**The trigger is checked by the wrappers.** Counting rows correctly did not help, because no
-step ever ran the count. The trigger went unchecked from 08-20 to 09-22 while 247 rows piled
-up, and the log grew to 144 KB. Both `pi-delegate` and `grok-delegate` now call
-`delegate-retro-due` at launch (real runs only). It prints one `delegate: retro due …` line to
-stderr once the trigger holds and stays silent otherwise. When that line shows up in a launch's
-output, hand the retro off as described below. You can also run `delegate-retro-due` by hand
-(exit 0 = due, 1 = not due).
-
-### Where the retro runs — never inline
-
-**Do not run the retro in the session that tripped the trigger.** It reads the whole log, edits
-routing config, and argues with itself about past grades; doing that inline derails whatever the
-user was actually working on. When the trigger fires mid-task, say so in one line, launch the
-retro in its own herdr workspace, and carry on with the task at hand.
-
-It runs in the **root platform checkout, `~/jb/platform`** (the main checkout on `main` — not a
-feature worktree). Two reasons: the retro's memory scope is the `-home-tim-jb-platform` project,
-and a feature worktree's branch state is irrelevant noise to it. The retro edits dotfiles and chezmoi sources, never repo files, so it
-cannot conflict with work in progress there.
-
-Verified recipe:
-
-```sh
-# 1. fresh workspace, unfocused so it doesn't steal the user's screen
-WS=$(herdr workspace create --cwd ~/jb/platform --label "delegate-retro" --no-focus \
-     | python3 -c "import sys,json;print(json.load(sys.stdin)['result']['workspace']['workspace_id'])")
-
-# 2. a Claude session in it, pointed straight at the retro
-herdr agent start delegate-retro --cwd ~/jb/platform --workspace "$WS" --no-focus \
-  -- claude "/delegate retro"
-
-# 3. read progress (NOT --source recent, which returns empty)
-herdr agent read delegate-retro --source visible --lines 40
-
-# 4. when it has landed its edits
-herdr workspace close "$WS"
-```
-
-Gotchas, all confirmed by running them:
-
-- `workspace create` returns the id at `result.workspace.workspace_id` — not `result.workspace_id`.
-- `agent read` needs `--source visible`; the default (`recent`) comes back empty.
-- `agent start` splits a new pane into the workspace rather than reusing the root pane.
-- Close the workspace when done — an abandoned retro workspace is indistinguishable from the
-  user's own and will accumulate.
-
-Tell the user the workspace label and that it's running unfocused, so they can attach
-(`herdr agent attach delegate-retro`) and take it over if they want a say in the routing changes.
+**Retros run only when Tim asks** (`/delegate retro`). Nothing triggers one automatically: don't
+start, suggest or hand off a retro because rows have piled up. `LOG.md`'s `retro-state` header
+records `last=<date> base=<N>`, where `N` is the count of dated table rows the last retro left
+behind (`grep -cE '^\| [0-9]{4}-' LOG.md`). Every row past `base` is new to the next retro.
 
 **Before step 1, sync the shared source.** Two machines run this retro against one chezmoi
 source, and each one only sees its own `LOG.md`. The 09-26 tim-dev retro never saw jb-dev's
